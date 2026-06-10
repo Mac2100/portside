@@ -12,7 +12,7 @@
 <p align="center">
   <img src="https://img.shields.io/badge/platform-macOS%20(Apple%20Silicon)-blue" alt="platform">
   <img src="https://img.shields.io/badge/built%20with-Electron-9feaf9" alt="electron">
-  <img src="https://img.shields.io/badge/license-MIT-green" alt="license">
+  <img src="https://img.shields.io/badge/license-PolyForm%20Noncommercial-orange" alt="license">
   <img src="https://img.shields.io/badge/code%20written%20by%20me-0%25-red" alt="vibe coded">
   <img src="https://img.shields.io/badge/vibes-100%25-purple" alt="vibes">
 </p>
@@ -102,4 +102,9 @@ bar panel is a frameless vibrancy window. Your certs and config never leave your
 
 ## License
 
-[MIT](LICENSE) — do whatever you want, just don't blame me (or the AI).
+[PolyForm Noncommercial 1.0.0](LICENSE) — free for personal use, home labs, hobby
+projects, education, and nonprofits. If you want to use Portside **commercially**
+(sell it, bundle it, build a paid product on it), that requires my permission —
+open an issue or get in touch.
+
+Translation: enjoy it at home, but if you make a million bucks off it, I'd like to hear about it first. 😄
