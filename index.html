@@ -1,0 +1,3121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Portside</title>
+<style>
+  /* ── Reset & Base ─────────────────────────────────────────────── */
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg0:       #0d1117;
+    --bg1:       #161b22;
+    --bg2:       #21262d;
+    --bg3:       #30363d;
+    --border:    #30363d;
+    --text:      #e6edf3;
+    --text-muted:#8b949e;
+    --accent:    #58a6ff;
+    --accent2:   #3fb950;
+    --warn:      #d29922;
+    --danger:    #f85149;
+    --purple:    #bc8cff;
+    --cyan:      #39d353;
+    --running:   #3fb950;
+    --stopped:   #f85149;
+    --paused:    #d29922;
+    --sidebar-w: 220px;
+    --titlebar:  38px;
+  }
+
+  :root[data-theme="light"] {
+    --bg0:       #f6f8fa;
+    --bg1:       #ffffff;
+    --bg2:       #eaeef2;
+    --bg3:       #d0d7de;
+    --border:    #d0d7de;
+    --text:      #1f2328;
+    --text-muted:#59636e;
+    --accent:    #0969da;
+    --accent2:   #1a7f37;
+    --warn:      #9a6700;
+    --danger:    #d1242f;
+    --purple:    #8250df;
+    --cyan:      #1b7c83;
+    --running:   #1a7f37;
+    --stopped:   #d1242f;
+    --paused:    #9a6700;
+  }
+  :root[data-theme="light"] .btn-primary { color: #ffffff; }
+  :root[data-theme="light"] .toast { box-shadow: 0 4px 20px rgba(0,0,0,0.15); }
+
+  /* Theme & logo pickers */
+  .seg-group { display: inline-flex; background: var(--bg0); border: 1px solid var(--border); border-radius: 8px; padding: 3px; gap: 2px; }
+  .seg-btn {
+    border: none; background: transparent; color: var(--text-muted);
+    padding: 5px 14px; border-radius: 6px; font-size: 12px; font-family: inherit; cursor: pointer;
+  }
+  .seg-btn.active { background: var(--bg2); color: var(--text); font-weight: 600; box-shadow: 0 1px 3px rgba(0,0,0,0.2); }
+  .logo-swatches { display: flex; gap: 10px; }
+  .logo-swatch {
+    width: 52px; height: 52px; border-radius: 12px; cursor: pointer;
+    border: 2px solid var(--border); padding: 4px; background: var(--bg0);
+    display: flex; align-items: center; justify-content: center;
+    transition: border-color 0.15s, transform 0.1s;
+  }
+  .logo-swatch:hover { transform: scale(1.05); }
+  .logo-swatch.active { border-color: var(--accent); }
+  .logo-swatch img { width: 100%; height: 100%; border-radius: 8px; }
+  .switch-row { display: flex; align-items: center; gap: 10px; }
+  .switch-row input[type=checkbox] { width: 16px; height: 16px; accent-color: var(--accent); cursor: pointer; }
+  .cert-row { display: flex; align-items: center; gap: 8px; font-size: 12px; margin-bottom: 6px; }
+  .cert-pill { font-size: 10px; padding: 1px 7px; border-radius: 10px; background: var(--bg3); color: var(--text-muted); }
+  .cert-pill.custom { background: rgba(88,166,255,0.18); color: var(--accent); }
+  .cert-pill.expired { background: rgba(248,81,73,0.18); color: var(--danger); }
+
+  html, body {
+    height: 100%; width: 100%;
+    background: var(--bg0);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', sans-serif;
+    font-size: 13px;
+    overflow: hidden;
+    user-select: none;
+  }
+
+  /* ── Title bar drag area ──────────────────────────────────────── */
+  #titlebar {
+    height: var(--titlebar);
+    background: var(--bg1);
+    -webkit-app-region: drag;
+    display: flex;
+    align-items: center;
+    padding: 0 16px 0 80px;
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+    gap: 12px;
+  }
+  #titlebar .app-name {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-muted);
+    letter-spacing: 0.5px;
+  }
+  #connection-status {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
+    color: var(--text-muted);
+    -webkit-app-region: no-drag;
+  }
+  .status-dot {
+    width: 7px; height: 7px;
+    border-radius: 50%;
+    background: var(--stopped);
+    transition: background 0.3s;
+  }
+  .status-dot.connected { background: var(--running); }
+
+  /* ── Layout ───────────────────────────────────────────────────── */
+  #app {
+    display: flex;
+    height: calc(100vh - var(--titlebar));
+  }
+
+  /* ── Sidebar ──────────────────────────────────────────────────── */
+  #sidebar {
+    width: var(--sidebar-w);
+    background: var(--bg1);
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    padding: 12px 0;
+    flex-shrink: 0;
+  }
+  .nav-section-label {
+    padding: 8px 16px 4px;
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--text-muted);
+    letter-spacing: 0.8px;
+    text-transform: uppercase;
+  }
+  .nav-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 16px;
+    cursor: pointer;
+    border-radius: 6px;
+    margin: 1px 8px;
+    color: var(--text-muted);
+    font-size: 13px;
+    transition: all 0.15s;
+    position: relative;
+  }
+  .nav-item:hover { background: var(--bg2); color: var(--text); }
+  .nav-item.active {
+    background: rgba(88, 166, 255, 0.15);
+    color: var(--accent);
+  }
+  .nav-item .nav-icon { font-size: 15px; width: 18px; text-align: center; }
+  .nav-badge {
+    margin-left: auto;
+    background: var(--bg3);
+    color: var(--text-muted);
+    font-size: 10px;
+    padding: 1px 6px;
+    border-radius: 10px;
+    min-width: 20px;
+    text-align: center;
+  }
+  .nav-badge.running { background: rgba(63, 185, 80, 0.2); color: var(--running); }
+
+  /* ── Main content ─────────────────────────────────────────────── */
+  #main {
+    flex: 1;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .page { display: none; flex-direction: column; height: 100%; overflow: hidden; }
+  .page.active { display: flex; }
+
+  /* ── Page header ──────────────────────────────────────────────── */
+  .page-header {
+    padding: 16px 20px 12px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-shrink: 0;
+    background: var(--bg0);
+  }
+  .page-title { font-size: 18px; font-weight: 600; }
+  .page-subtitle { font-size: 12px; color: var(--text-muted); margin-left: 4px; }
+  .header-actions { margin-left: auto; display: flex; gap: 8px; }
+
+  /* ── Buttons ──────────────────────────────────────────────────── */
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 5px 12px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: var(--bg2);
+    color: var(--text);
+    cursor: pointer;
+    font-size: 12px;
+    font-family: inherit;
+    transition: all 0.15s;
+    white-space: nowrap;
+  }
+  .btn:hover { background: var(--bg3); border-color: #8b949e; }
+  .btn-primary { background: var(--accent); border-color: var(--accent); color: #0d1117; font-weight: 600; }
+  .btn-primary:hover { background: #79c0ff; border-color: #79c0ff; }
+  .btn-success { background: rgba(63, 185, 80, 0.2); border-color: var(--running); color: var(--running); }
+  .btn-success:hover { background: rgba(63, 185, 80, 0.35); }
+  .btn-danger { background: rgba(248, 81, 73, 0.15); border-color: var(--danger); color: var(--danger); }
+  .btn-danger:hover { background: rgba(248, 81, 73, 0.3); }
+  .btn-warn { background: rgba(210, 153, 34, 0.15); border-color: var(--warn); color: var(--warn); }
+  .btn-warn:hover { background: rgba(210, 153, 34, 0.3); }
+  .btn-icon { padding: 5px 8px; }
+  .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  /* ── Scroll area ─────────────────────────────────────────────── */
+  .scroll-area {
+    flex: 1;
+    overflow-y: auto;
+    padding: 16px 20px;
+  }
+  .scroll-area::-webkit-scrollbar { width: 6px; }
+  .scroll-area::-webkit-scrollbar-track { background: transparent; }
+  .scroll-area::-webkit-scrollbar-thumb { background: var(--bg3); border-radius: 3px; }
+
+  /* ── Dashboard Stats row ─────────────────────────────────────── */
+  .stats-row {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 12px;
+    margin-bottom: 20px;
+  }
+  .stat-card {
+    background: var(--bg1);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px 16px;
+  }
+  .stat-card-label {
+    font-size: 11px;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+    margin-bottom: 6px;
+  }
+  .stat-card-value {
+    font-size: 28px;
+    font-weight: 700;
+    line-height: 1;
+    margin-bottom: 4px;
+  }
+  .stat-card-sub { font-size: 11px; color: var(--text-muted); }
+  .stat-card.running .stat-card-value { color: var(--running); }
+  .stat-card.stopped .stat-card-value { color: var(--stopped); }
+  .stat-card.images .stat-card-value { color: var(--accent); }
+  .stat-card.total .stat-card-value { color: var(--text); }
+
+  /* ── Container table ─────────────────────────────────────────── */
+  .section-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 10px;
+  }
+  .section-title { font-size: 14px; font-weight: 600; }
+
+  .container-table {
+    width: 100%;
+    border-collapse: collapse;
+    background: var(--bg1);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    overflow: hidden;
+  }
+  .container-table th {
+    padding: 10px 14px;
+    text-align: left;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+    background: var(--bg2);
+    border-bottom: 1px solid var(--border);
+  }
+  .container-table td {
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border);
+    font-size: 12px;
+    vertical-align: middle;
+  }
+  .container-table tr:last-child td { border-bottom: none; }
+  .container-table tbody tr { cursor: pointer; transition: background 0.12s; }
+  .container-table tbody tr:hover { background: var(--bg2); }
+
+  .status-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-size: 11px;
+    font-weight: 600;
+  }
+  .status-badge::before {
+    content: '';
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: currentColor;
+  }
+  .status-badge.running { background: rgba(63, 185, 80, 0.15); color: var(--running); }
+  .status-badge.exited, .status-badge.stopped { background: rgba(248, 81, 73, 0.15); color: var(--stopped); }
+  .status-badge.paused { background: rgba(210, 153, 34, 0.15); color: var(--warn); }
+  .status-badge.restarting { background: rgba(88, 166, 255, 0.15); color: var(--accent); }
+  .status-badge.created { background: rgba(139, 148, 158, 0.15); color: var(--text-muted); }
+
+  .container-name { font-weight: 600; color: var(--text); }
+  .container-image { color: var(--text-muted); font-size: 11px; }
+  .container-ports { color: var(--cyan); font-size: 11px; }
+
+  .action-group { display: flex; gap: 4px; }
+
+  /* ── Stats bars ──────────────────────────────────────────────── */
+  .mini-bar-container {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 80px;
+  }
+  .mini-bar {
+    flex: 1;
+    height: 4px;
+    background: var(--bg3);
+    border-radius: 2px;
+    overflow: hidden;
+  }
+  .mini-bar-fill {
+    height: 100%;
+    border-radius: 2px;
+    transition: width 0.5s ease;
+    background: var(--accent);
+  }
+  .mini-bar-fill.high { background: var(--warn); }
+  .mini-bar-fill.critical { background: var(--danger); }
+  .mini-bar-value { font-size: 11px; color: var(--text-muted); min-width: 34px; text-align: right; }
+
+  /* ── Log viewer ──────────────────────────────────────────────── */
+  #log-panel {
+    position: fixed;
+    right: 0; bottom: 0;
+    width: 760px;
+    height: 480px;
+    background: var(--bg1);
+    border: 1px solid var(--border);
+    border-bottom: none; border-right: none;
+    border-radius: 10px 0 0 0;
+    display: flex;
+    flex-direction: column;
+    z-index: 100;
+    transform: translateY(100%);
+    transition: transform 0.25s ease;
+  }
+  #log-panel.open { transform: translateY(0); }
+  .log-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg2);
+    border-radius: 10px 0 0 0;
+    flex-shrink: 0;
+  }
+  .log-title { font-size: 13px; font-weight: 600; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #log-search {
+    background: #0d1117; border: 1px solid var(--bg3); border-radius: 6px;
+    color: #e6edf3; font-size: 11px; padding: 4px 8px; width: 170px;
+    font-family: inherit; outline: none;
+  }
+  #log-search:focus { border-color: var(--accent); }
+  #log-live-dot {
+    width: 7px; height: 7px; border-radius: 50%;
+    background: var(--running); flex-shrink: 0;
+    animation: livePulse 1.5s ease-in-out infinite;
+  }
+  #log-live-dot.paused { background: var(--warn); animation: none; }
+  @keyframes livePulse { 0%,100% { opacity: 1; } 50% { opacity: 0.35; } }
+  #log-output-term { flex: 1; background: #0d1117; padding: 6px 2px 6px 8px; overflow: hidden; }
+  #log-output-term .xterm { height: 100%; }
+
+  /* ── Detail panel (right slide-in) ───────────────────────────── */
+  #detail-panel {
+    position: fixed;
+    right: 0; top: var(--titlebar);
+    width: 360px;
+    height: calc(100vh - var(--titlebar));
+    background: var(--bg1);
+    border-left: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    z-index: 50;
+    transform: translateX(100%);
+    transition: transform 0.25s ease;
+  }
+  #detail-panel.open { transform: translateX(0); }
+  .detail-header {
+    padding: 14px 16px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-shrink: 0;
+  }
+  .detail-title { font-size: 14px; font-weight: 600; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .detail-scroll { flex: 1; overflow-y: auto; padding: 16px; }
+  .detail-scroll::-webkit-scrollbar { width: 5px; }
+  .detail-scroll::-webkit-scrollbar-thumb { background: var(--bg3); border-radius: 3px; }
+
+  .detail-section { margin-bottom: 20px; }
+  .detail-section-title {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.7px;
+    margin-bottom: 8px;
+  }
+  .detail-row { display: flex; gap: 8px; margin-bottom: 6px; align-items: flex-start; }
+  .detail-label { font-size: 11px; color: var(--text-muted); min-width: 80px; flex-shrink: 0; padding-top: 1px; }
+  .detail-value { font-size: 12px; color: var(--text); word-break: break-all; }
+
+  .stat-gauge {
+    margin-bottom: 12px;
+  }
+  .stat-gauge-header { display: flex; justify-content: space-between; margin-bottom: 4px; }
+  .stat-gauge-label { font-size: 12px; color: var(--text-muted); }
+  .stat-gauge-value { font-size: 12px; font-weight: 600; }
+  .stat-gauge-bar {
+    height: 6px;
+    background: var(--bg3);
+    border-radius: 3px;
+    overflow: hidden;
+  }
+  .stat-gauge-fill {
+    height: 100%;
+    border-radius: 3px;
+    background: linear-gradient(90deg, var(--accent), var(--purple));
+    transition: width 0.6s ease;
+  }
+  .stat-gauge-fill.warn { background: linear-gradient(90deg, var(--warn), var(--danger)); }
+
+  /* ── Images / Volumes / Networks pages ──────────────────────── */
+  .resource-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 10px;
+    margin-bottom: 20px;
+  }
+  .resource-card {
+    background: var(--bg1);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px 16px;
+    transition: border-color 0.15s;
+  }
+  .resource-card:hover { border-color: var(--accent); }
+  .resource-card-name { font-weight: 600; margin-bottom: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .resource-card-meta { font-size: 11px; color: var(--text-muted); margin-bottom: 3px; }
+  .resource-tag {
+    display: inline-block;
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 10px;
+    background: var(--bg3);
+    color: var(--text-muted);
+    margin: 2px 2px 0 0;
+  }
+
+  /* ── Settings ────────────────────────────────────────────────── */
+  .settings-card {
+    background: var(--bg1);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 20px;
+    margin-bottom: 16px;
+    max-width: 540px;
+  }
+  .settings-card-title {
+    font-size: 14px;
+    font-weight: 600;
+    margin-bottom: 14px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--border);
+  }
+  .form-group { margin-bottom: 14px; }
+  .form-label { display: block; font-size: 12px; color: var(--text-muted); margin-bottom: 5px; }
+  .form-input {
+    width: 100%;
+    background: var(--bg0);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 7px 10px;
+    color: var(--text);
+    font-size: 13px;
+    font-family: inherit;
+    outline: none;
+    transition: border-color 0.15s;
+  }
+  .form-input:focus { border-color: var(--accent); }
+  .form-hint { font-size: 11px; color: var(--text-muted); margin-top: 4px; }
+
+  /* ── Empty/loading states ────────────────────────────────────── */
+  .empty-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 60px 20px;
+    color: var(--text-muted);
+    gap: 10px;
+  }
+  .empty-icon { font-size: 40px; opacity: 0.4; }
+  .empty-title { font-size: 15px; font-weight: 600; }
+  .empty-sub { font-size: 12px; text-align: center; max-width: 280px; }
+
+  .spinner {
+    width: 20px; height: 20px;
+    border: 2px solid var(--bg3);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.7s linear infinite;
+    display: inline-block;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* ── Toast ────────────────────────────────────────────────────── */
+  #toast-container {
+    position: fixed;
+    bottom: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 999;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    pointer-events: none;
+  }
+  .toast {
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 16px;
+    font-size: 13px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.4);
+    animation: toastIn 0.2s ease;
+    pointer-events: all;
+  }
+  .toast.success { border-color: var(--running); color: var(--running); }
+  .toast.error { border-color: var(--danger); color: var(--danger); }
+  .toast.info { border-color: var(--accent); color: var(--accent); }
+  @keyframes toastIn { from { opacity:0; transform:translateY(10px); } to { opacity:1; transform:translateY(0); } }
+
+  /* ── Metrics dashboard (NeoServer-style) ─────────────────────── */
+  .metrics-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 12px;
+    margin-bottom: 16px;
+  }
+  .metric-card {
+    background: var(--bg1);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 14px 16px;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    min-height: 96px;
+  }
+  .ring-wrap { position: relative; width: 64px; height: 64px; flex-shrink: 0; }
+  .ring-wrap svg { transform: rotate(-90deg); }
+  .ring-track { fill: none; stroke: var(--bg3); stroke-width: 7; }
+  .ring-fill {
+    fill: none; stroke-width: 7; stroke-linecap: round;
+    transition: stroke-dashoffset 0.6s ease, stroke 0.4s;
+  }
+  .ring-label {
+    position: absolute; inset: 0;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 13px; font-weight: 700;
+  }
+  .metric-meta { min-width: 0; }
+  .metric-title { font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.6px; margin-bottom: 4px; }
+  .metric-value { font-size: 16px; font-weight: 700; line-height: 1.2; }
+  .metric-sub { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+
+  .charts-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    margin-bottom: 16px;
+  }
+  .chart-card {
+    background: var(--bg1);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 12px 14px 8px;
+  }
+  .chart-card-header { display: flex; align-items: baseline; gap: 8px; margin-bottom: 6px; }
+  .chart-card-title { font-size: 12px; font-weight: 600; }
+  .chart-card-value { font-size: 11px; color: var(--text-muted); margin-left: auto; }
+  .chart-card canvas { width: 100%; height: 110px; display: block; }
+
+  /* ── Insights ────────────────────────────────────────────────── */
+  .insight-item {
+    display: flex; align-items: center; gap: 12px;
+    background: var(--bg1);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 10px 14px;
+    margin-bottom: 8px;
+  }
+  .insight-icon {
+    width: 30px; height: 30px; border-radius: 8px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 15px; flex-shrink: 0;
+    background: var(--bg2);
+  }
+  .insight-item.warn { border-color: rgba(210,153,34,0.5); }
+  .insight-item.warn .insight-icon { background: rgba(210,153,34,0.15); }
+  .insight-item.crit { border-color: rgba(248,81,73,0.5); }
+  .insight-item.crit .insight-icon { background: rgba(248,81,73,0.15); }
+  .insight-item.good { border-color: rgba(63,185,80,0.4); }
+  .insight-item.good .insight-icon { background: rgba(63,185,80,0.15); }
+  .insight-body { min-width: 0; flex: 1; }
+  .insight-title { font-size: 13px; font-weight: 600; }
+  .insight-sub { font-size: 11px; color: var(--text-muted); margin-top: 1px; }
+  .insight-value { font-size: 14px; font-weight: 700; flex-shrink: 0; }
+  .insight-action { flex-shrink: 0; }
+  .insight-item.clickable { cursor: pointer; transition: border-color 0.15s, background 0.15s; }
+  .insight-item.clickable:hover { border-color: var(--accent); background: var(--bg2); }
+
+  /* ── Top consumer lists ──────────────────────────────────────── */
+  .top-row {
+    display: flex; align-items: center; gap: 10px;
+    padding: 5px 2px;
+    border-radius: 6px;
+    cursor: pointer;
+  }
+  .top-row:hover { background: var(--bg2); }
+  .top-name { font-size: 12px; width: 110px; flex-shrink: 0; }
+  .top-bar { flex: 1; height: 5px; background: var(--bg3); border-radius: 3px; overflow: hidden; }
+  .top-bar-fill { height: 100%; border-radius: 3px; background: linear-gradient(90deg, var(--accent), var(--purple)); transition: width 0.6s ease; }
+  .top-bar-fill.hot { background: linear-gradient(90deg, var(--warn), var(--danger)); }
+  .top-val { font-size: 11px; color: var(--text-muted); min-width: 52px; text-align: right; font-variant-numeric: tabular-nums; }
+  .nav-badge.alert { background: rgba(248, 81, 73, 0.25); color: var(--danger); font-weight: 700; }
+
+  /* ── Terminal page ───────────────────────────────────────────── */
+  #page-terminal .scroll-area { padding: 0; display: flex; flex-direction: column; overflow: hidden; }
+  #terminal-toolbar {
+    display: flex; align-items: center; gap: 8px;
+    padding: 10px 16px;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg1);
+    flex-shrink: 0;
+  }
+  #term-container-select {
+    background: var(--bg0); color: var(--text);
+    border: 1px solid var(--border); border-radius: 6px;
+    padding: 5px 10px; font-size: 12px; font-family: inherit;
+    min-width: 200px; outline: none; cursor: pointer;
+  }
+  #term-status { font-size: 11px; color: var(--text-muted); margin-left: auto; display: flex; align-items: center; gap: 6px; }
+  #terminal-wrap {
+    flex: 1;
+    background: #0d1117;
+    padding: 8px 4px 8px 10px;
+    overflow: hidden;
+  }
+  #terminal-wrap .xterm { height: 100%; }
+
+  /* ── Misc ────────────────────────────────────────────────────── */
+  .flex { display: flex; }
+  .gap-2 { gap: 8px; }
+  .text-muted { color: var(--text-muted); }
+  .font-mono { font-family: 'SF Mono', monospace; }
+  .truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  /* ── Files page ──────────────────────────────────────────────── */
+  #files-toolbar {
+    display: flex; align-items: center; gap: 8px;
+    padding: 10px 16px; border-bottom: 1px solid var(--border);
+    background: var(--bg1); flex-shrink: 0; flex-wrap: wrap;
+  }
+  #files-container-select {
+    background: var(--bg0); color: var(--text);
+    border: 1px solid var(--border); border-radius: 6px;
+    padding: 5px 10px; font-size: 12px; font-family: inherit;
+    min-width: 180px; outline: none; cursor: pointer;
+  }
+  /* Host switcher + hosts settings */
+  #host-switcher {
+    -webkit-app-region: no-drag;
+    background: var(--bg2); color: var(--text);
+    border: 1px solid var(--border); border-radius: 6px;
+    font-size: 11px; padding: 2px 6px; font-family: inherit;
+    outline: none; cursor: pointer; max-width: 140px;
+  }
+  .host-row {
+    display: flex; align-items: center; gap: 10px;
+    padding: 9px 12px; border: 1px solid var(--border);
+    border-radius: 8px; margin-bottom: 6px; background: var(--bg0);
+  }
+  .host-row.active { border-color: var(--accent); }
+  .host-row input[type=radio] { accent-color: var(--accent); cursor: pointer; }
+  .host-row-name { font-weight: 600; font-size: 13px; }
+  .host-row-addr { font-size: 11px; color: var(--text-muted); font-family: 'SF Mono', monospace; flex: 1; }
+
+  /* Activity feed */
+  .event-row {
+    display: flex; align-items: center; gap: 12px;
+    padding: 8px 14px; border-bottom: 1px solid var(--border);
+    font-size: 12.5px;
+  }
+  .event-row:last-child { border-bottom: none; }
+  .event-time { font-size: 11px; color: var(--text-muted); font-family: 'SF Mono', monospace; width: 76px; flex-shrink: 0; }
+  .event-icon { width: 22px; text-align: center; flex-shrink: 0; }
+  .event-action { font-weight: 600; width: 110px; flex-shrink: 0; text-transform: capitalize; }
+  .event-action.good { color: var(--running); }
+  .event-action.bad { color: var(--danger); }
+  .event-action.warn { color: var(--warn); }
+  .event-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .event-extra { font-size: 11px; color: var(--text-muted); }
+  #events-list { background: var(--bg1); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+
+  #files-mounts { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+  .mount-chip {
+    font-size: 11px; font-family: 'SF Mono', monospace;
+    padding: 3px 10px; border-radius: 12px; cursor: pointer;
+    background: var(--bg2); border: 1px solid var(--border); color: var(--text-muted);
+    transition: all 0.15s;
+  }
+  .mount-chip:hover { border-color: var(--accent); color: var(--text); }
+  .mount-chip.active { background: rgba(88,166,255,0.15); border-color: var(--accent); color: var(--accent); font-weight: 600; }
+  #files-crumbs { display: flex; align-items: center; gap: 2px; font-size: 12px; font-family: 'SF Mono', monospace; flex-wrap: wrap; }
+  .crumb { color: var(--accent); cursor: pointer; padding: 2px 4px; border-radius: 4px; }
+  .crumb:hover { background: var(--bg2); }
+  .crumb-sep { color: var(--text-muted); }
+  .file-name { display: flex; align-items: center; gap: 8px; font-size: 12.5px; }
+  .file-name.dir { color: var(--accent); cursor: pointer; font-weight: 600; }
+  .file-acts { display: flex; gap: 4px; justify-content: flex-end; }
+
+  /* ── Modal (editor + deploy) ─────────────────────────────────── */
+  .modal-overlay {
+    position: fixed; inset: 0; z-index: 200;
+    background: rgba(0,0,0,0.55);
+    display: none; align-items: center; justify-content: center;
+  }
+  .modal-overlay.open { display: flex; }
+  .modal {
+    background: var(--bg1); border: 1px solid var(--border);
+    border-radius: 14px; width: 720px; max-width: 92vw;
+    max-height: 86vh; display: flex; flex-direction: column;
+    box-shadow: 0 16px 60px rgba(0,0,0,0.5);
+  }
+  .modal-header {
+    display: flex; align-items: center; gap: 10px;
+    padding: 14px 18px; border-bottom: 1px solid var(--border); flex-shrink: 0;
+  }
+  .modal-title { font-size: 14px; font-weight: 700; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .modal-body { flex: 1; overflow-y: auto; padding: 16px 18px; }
+  .modal-footer { display: flex; gap: 8px; justify-content: flex-end; padding: 12px 18px; border-top: 1px solid var(--border); flex-shrink: 0; }
+  #editor-textarea {
+    width: 100%; height: 52vh; resize: none;
+    background: var(--bg0); color: var(--text);
+    border: 1px solid var(--border); border-radius: 8px;
+    font-family: 'SF Mono', Menlo, monospace; font-size: 12px; line-height: 1.5;
+    padding: 10px; outline: none; tab-size: 4; white-space: pre;
+  }
+  #editor-textarea:focus { border-color: var(--accent); }
+  .kv-row { display: flex; gap: 6px; margin-bottom: 6px; align-items: center; }
+  .kv-row .form-input { flex: 1; }
+  .kv-row .form-input.small { flex: 0 0 110px; }
+  .kv-remove {
+    border: 1px solid var(--border); background: var(--bg2); color: var(--text-muted);
+    width: 26px; height: 28px; border-radius: 6px; cursor: pointer; flex-shrink: 0;
+  }
+  .kv-remove:hover { color: var(--danger); border-color: var(--danger); }
+  .kv-add { font-size: 11px; color: var(--accent); cursor: pointer; display: inline-block; margin-bottom: 8px; }
+  .kv-add:hover { text-decoration: underline; }
+  .deploy-label { font-size: 11px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.6px; margin: 14px 0 6px; }
+
+  /* ── Startup splash ──────────────────────────────────────────── */
+  #splash {
+    position: fixed; inset: 0; z-index: 1000;
+    background: var(--bg0);
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 22px;
+    opacity: 1; transition: opacity 0.45s ease;
+  }
+  #splash.done { opacity: 0; pointer-events: none; }
+  #splash svg { overflow: visible; }
+  .splash-layer {
+    opacity: 0;
+    animation: splashDrop 0.55s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+  }
+  .splash-layer.l1 { animation-delay: 0.15s; }
+  .splash-layer.l2 { animation-delay: 0.42s; }
+  .splash-layer.l3 { animation-delay: 0.69s; }
+  @keyframes splashDrop {
+    from { opacity: 0; transform: translateY(-46px); }
+    60%  { opacity: 1; }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+  #splash-name {
+    font-size: 22px; font-weight: 700; letter-spacing: 0.5px;
+    opacity: 0; animation: splashName 0.5s ease 1.05s forwards;
+  }
+  #splash-sub {
+    font-size: 11px; color: var(--text-muted); letter-spacing: 2.5px; text-transform: uppercase;
+    margin-top: -16px;
+    opacity: 0; animation: splashName 0.5s ease 1.2s forwards;
+  }
+  @keyframes splashName {
+    from { opacity: 0; transform: translateY(8px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+  #splash .splash-glow {
+    opacity: 0;
+    animation: splashGlow 0.9s ease 0.95s forwards;
+  }
+  @keyframes splashGlow {
+    from { opacity: 0; }
+    50%  { opacity: 0.35; }
+    to   { opacity: 0.12; }
+  }
+</style>
+<link rel="stylesheet" href="node_modules/@xterm/xterm/css/xterm.css">
+</head>
+<body>
+
+<!-- Startup splash -->
+<div id="splash">
+  <svg width="120" height="132" viewBox="180 130 664 780" xmlns="http://www.w3.org/2000/svg">
+    <ellipse class="splash-glow" cx="512" cy="880" rx="300" ry="36" fill="#2dd4bf"/>
+    <g class="splash-layer l1">
+      <polygon points="512,720 742,605 742,735 512,850" fill="#1d4ed8"/>
+      <polygon points="282,605 512,720 512,850 282,735" fill="#2563eb"/>
+      <polygon points="512,490 742,605 512,720 282,605" fill="#3b82f6"/>
+    </g>
+    <g class="splash-layer l2">
+      <polygon points="512,590 742,475 742,605 512,720" fill="#0284c7"/>
+      <polygon points="282,475 512,590 512,720 282,605" fill="#0ea5e9"/>
+      <polygon points="512,360 742,475 512,590 282,475" fill="#38bdf8"/>
+    </g>
+    <g class="splash-layer l3">
+      <polygon points="512,460 742,345 742,475 512,590" fill="#0d9488"/>
+      <polygon points="282,345 512,460 512,590 282,475" fill="#14b8a6"/>
+      <polygon points="512,230 742,345 512,460 282,345" fill="#2dd4bf"/>
+    </g>
+  </svg>
+  <div id="splash-name">Portside</div>
+  <div id="splash-sub">Container Command</div>
+</div>
+
+<!-- Title bar -->
+<div id="titlebar">
+  <span class="app-name" style="display:flex;align-items:center;gap:7px">
+    <svg width="18" height="18" viewBox="180 130 664 780" xmlns="http://www.w3.org/2000/svg">
+      <polygon points="512,720 742,605 742,735 512,850" fill="#1d4ed8"/>
+      <polygon points="282,605 512,720 512,850 282,735" fill="#2563eb"/>
+      <polygon points="512,490 742,605 512,720 282,605" fill="#3b82f6"/>
+      <polygon points="512,590 742,475 742,605 512,720" fill="#0284c7"/>
+      <polygon points="282,475 512,590 512,720 282,605" fill="#0ea5e9"/>
+      <polygon points="512,360 742,475 512,590 282,475" fill="#38bdf8"/>
+      <polygon points="512,460 742,345 742,475 512,590" fill="#0d9488"/>
+      <polygon points="282,345 512,460 512,590 282,475" fill="#14b8a6"/>
+      <polygon points="512,230 742,345 512,460 282,345" fill="#2dd4bf"/>
+    </svg>
+    Portside</span>
+  <div id="connection-status">
+    <select id="host-switcher" style="display:none"></select>
+    <div class="status-dot" id="conn-dot"></div>
+    <span id="conn-label">Not connected</span>
+    <button class="btn btn-icon" id="refresh-btn" title="Refresh" style="margin-left:8px">↻</button>
+  </div>
+</div>
+
+<div id="app">
+  <!-- Sidebar -->
+  <nav id="sidebar">
+    <div class="nav-section-label">Overview</div>
+    <div class="nav-item active" data-page="dashboard">
+      <span class="nav-icon">⊞</span> Dashboard
+      <span class="nav-badge alert" id="nav-alerts-count" style="display:none">0</span>
+    </div>
+    <div class="nav-item" data-page="events">
+      <span class="nav-icon">☷</span> Activity
+    </div>
+
+    <div class="nav-section-label" style="margin-top:8px">Resources</div>
+    <div class="nav-item" data-page="containers">
+      <span class="nav-icon">◫</span> Containers
+      <span class="nav-badge running" id="nav-running-count">0</span>
+    </div>
+    <div class="nav-item" data-page="images">
+      <span class="nav-icon">◱</span> Images
+      <span class="nav-badge" id="nav-images-count">0</span>
+    </div>
+    <div class="nav-item" data-page="volumes">
+      <span class="nav-icon">⬡</span> Volumes
+      <span class="nav-badge" id="nav-volumes-count">0</span>
+    </div>
+    <div class="nav-item" data-page="networks">
+      <span class="nav-icon">⬡</span> Networks
+      <span class="nav-badge" id="nav-networks-count">0</span>
+    </div>
+
+    <div class="nav-section-label" style="margin-top:8px">Tools</div>
+    <div class="nav-item" data-page="terminal">
+      <span class="nav-icon" style="font-family:monospace;font-size:12px">&gt;_</span> Terminal
+    </div>
+    <div class="nav-item" data-page="files">
+      <span class="nav-icon">◳</span> File Browser
+    </div>
+
+    <div class="nav-section-label" style="margin-top:8px">System</div>
+    <div class="nav-item" data-page="settings">
+      <span class="nav-icon">⚙</span> Settings
+    </div>
+  </nav>
+
+  <!-- Main -->
+  <div id="main">
+
+    <!-- ── DASHBOARD ─────────────────────────────────────────── -->
+    <div id="page-dashboard" class="page active">
+      <div class="page-header">
+        <div>
+          <div class="page-title">Dashboard</div>
+          <span class="page-subtitle" id="docker-version-label"></span>
+        </div>
+        <div class="header-actions">
+          <button class="btn" id="updates-btn" title="Check registries for newer images">⬆ Check updates</button>
+          <button class="btn btn-primary" id="dash-refresh-btn">↻ Refresh</button>
+        </div>
+      </div>
+      <div class="scroll-area">
+        <!-- System info strip -->
+        <div id="docker-info-strip" style="background:var(--bg1);border:1px solid var(--border);border-radius:10px;padding:12px 16px;margin-bottom:16px;display:none">
+          <div style="display:flex;gap:30px;flex-wrap:wrap">
+            <div><div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.6px;margin-bottom:3px">Docker</div><div id="info-docker-ver" style="font-size:13px;font-weight:600"></div></div>
+            <div><div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.6px;margin-bottom:3px">CPUs</div><div id="info-cpus" style="font-size:13px;font-weight:600"></div></div>
+            <div><div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.6px;margin-bottom:3px">Memory</div><div id="info-mem" style="font-size:13px;font-weight:600"></div></div>
+            <div><div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.6px;margin-bottom:3px">OS</div><div id="info-os" style="font-size:13px;font-weight:600"></div></div>
+            <div><div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.6px;margin-bottom:3px">Hostname</div><div id="info-host" style="font-size:13px;font-weight:600"></div></div>
+          </div>
+        </div>
+
+        <!-- Metric rings -->
+        <div class="metrics-grid">
+          <div class="metric-card">
+            <div class="ring-wrap" id="ring-cpu"></div>
+            <div class="metric-meta">
+              <div class="metric-title">CPU</div>
+              <div class="metric-value" id="metric-cpu-val">—</div>
+              <div class="metric-sub" id="metric-cpu-sub">across containers</div>
+            </div>
+          </div>
+          <div class="metric-card">
+            <div class="ring-wrap" id="ring-mem"></div>
+            <div class="metric-meta">
+              <div class="metric-title">Memory</div>
+              <div class="metric-value" id="metric-mem-val">—</div>
+              <div class="metric-sub" id="metric-mem-sub">—</div>
+            </div>
+          </div>
+          <div class="metric-card">
+            <div class="ring-wrap" id="ring-cont"></div>
+            <div class="metric-meta">
+              <div class="metric-title">Containers</div>
+              <div class="metric-value" id="metric-cont-val">—</div>
+              <div class="metric-sub" id="metric-cont-sub">running</div>
+            </div>
+          </div>
+          <div class="metric-card">
+            <div style="font-size:26px;flex-shrink:0">⇅</div>
+            <div class="metric-meta">
+              <div class="metric-title">Network I/O</div>
+              <div class="metric-value" id="metric-net-val">—</div>
+              <div class="metric-sub" id="metric-net-sub">↓ rx / ↑ tx per sec</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- History charts -->
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
+          <span class="section-title" style="font-size:13px">History</span>
+          <div class="seg-group" id="range-picker" style="padding:2px">
+            <button class="seg-btn active" data-range="live">Live</button>
+            <button class="seg-btn" data-range="24h">24h</button>
+            <button class="seg-btn" data-range="7d">7d</button>
+          </div>
+        </div>
+        <div class="charts-row">
+          <div class="chart-card">
+            <div class="chart-card-header"><span class="chart-card-title">CPU History</span><span class="chart-card-value" id="chart-cpu-now"></span></div>
+            <canvas id="chart-cpu"></canvas>
+          </div>
+          <div class="chart-card">
+            <div class="chart-card-header"><span class="chart-card-title">Memory History</span><span class="chart-card-value" id="chart-mem-now"></span></div>
+            <canvas id="chart-mem"></canvas>
+          </div>
+        </div>
+        <div class="chart-card" style="margin-bottom:16px">
+          <div class="chart-card-header"><span class="chart-card-title">Network Throughput</span><span class="chart-card-value" id="chart-net-now"></span></div>
+          <canvas id="chart-net"></canvas>
+        </div>
+
+        <!-- Top consumers -->
+        <div class="charts-row">
+          <div class="chart-card">
+            <div class="chart-card-header"><span class="chart-card-title">Top CPU</span></div>
+            <div id="top-cpu-list"></div>
+          </div>
+          <div class="chart-card">
+            <div class="chart-card-header"><span class="chart-card-title">Top Memory</span></div>
+            <div id="top-mem-list"></div>
+          </div>
+        </div>
+
+        <!-- Insights -->
+        <div class="section-header">
+          <span class="section-title">Insights</span>
+          <span class="page-subtitle" id="last-refresh"></span>
+        </div>
+        <div id="insights-list"></div>
+      </div>
+    </div>
+
+    <!-- ── CONTAINERS ──────────────────────────────────────────── -->
+    <div id="page-containers" class="page">
+      <div class="page-header">
+        <div class="page-title">Containers</div>
+        <div class="header-actions">
+          <button class="btn btn-success" id="deploy-btn">+ Deploy</button>
+          <button class="btn" id="containers-show-all-btn">Show All</button>
+          <button class="btn btn-primary" id="containers-refresh-btn">↻ Refresh</button>
+        </div>
+      </div>
+      <div class="scroll-area">
+        <div id="containers-list"></div>
+      </div>
+    </div>
+
+    <!-- ── IMAGES ──────────────────────────────────────────────── -->
+    <div id="page-images" class="page">
+      <div class="page-header">
+        <div class="page-title">Images</div>
+        <div class="header-actions">
+          <button class="btn btn-primary" id="images-refresh-btn">↻ Refresh</button>
+        </div>
+      </div>
+      <div class="scroll-area">
+        <div id="images-list"></div>
+      </div>
+    </div>
+
+    <!-- ── VOLUMES ─────────────────────────────────────────────── -->
+    <div id="page-volumes" class="page">
+      <div class="page-header">
+        <div class="page-title">Volumes</div>
+        <div class="header-actions">
+          <button class="btn btn-primary" id="volumes-refresh-btn">↻ Refresh</button>
+        </div>
+      </div>
+      <div class="scroll-area">
+        <div id="volumes-list"></div>
+      </div>
+    </div>
+
+    <!-- ── NETWORKS ────────────────────────────────────────────── -->
+    <div id="page-networks" class="page">
+      <div class="page-header">
+        <div class="page-title">Networks</div>
+        <div class="header-actions">
+          <button class="btn btn-primary" id="networks-refresh-btn">↻ Refresh</button>
+        </div>
+      </div>
+      <div class="scroll-area">
+        <div id="networks-list"></div>
+      </div>
+    </div>
+
+    <!-- ── TERMINAL ────────────────────────────────────────────── -->
+    <div id="page-terminal" class="page">
+      <div class="page-header">
+        <div class="page-title">Terminal</div>
+        <span class="page-subtitle">container console (docker exec)</span>
+      </div>
+      <div class="scroll-area">
+        <div id="terminal-toolbar">
+          <select id="term-container-select"></select>
+          <button class="btn btn-primary" id="term-connect-btn">Connect</button>
+          <button class="btn btn-danger" id="term-disconnect-btn" style="display:none">Disconnect</button>
+          <div id="term-status"><div class="status-dot" id="term-dot"></div><span id="term-status-label">Not connected</span></div>
+        </div>
+        <div id="terminal-wrap"></div>
+      </div>
+    </div>
+
+    <!-- ── ACTIVITY ────────────────────────────────────────────── -->
+    <div id="page-events" class="page">
+      <div class="page-header">
+        <div class="page-title">Activity</div>
+        <span class="page-subtitle">live Docker events since launch</span>
+      </div>
+      <div class="scroll-area">
+        <div id="events-list"></div>
+      </div>
+    </div>
+
+    <!-- ── FILES ───────────────────────────────────────────────── -->
+    <div id="page-files" class="page">
+      <div class="page-header">
+        <div class="page-title">File Browser</div>
+        <span class="page-subtitle">browse files inside running containers</span>
+        <div class="header-actions">
+          <button class="btn" id="files-upload-btn">⤒ Upload here</button>
+          <button class="btn btn-primary" id="files-refresh-btn">↻ Refresh</button>
+        </div>
+      </div>
+      <div class="scroll-area" style="padding:0;display:flex;flex-direction:column;overflow:hidden">
+        <div id="files-toolbar">
+          <select id="files-container-select"></select>
+          <div id="files-mounts"></div>
+          <div id="files-crumbs"></div>
+        </div>
+        <div style="flex:1;overflow-y:auto;padding:12px 16px" id="files-list-wrap">
+          <div id="files-list"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── SETTINGS ────────────────────────────────────────────── -->
+    <div id="page-settings" class="page">
+      <div class="page-header">
+        <div class="page-title">Settings</div>
+      </div>
+      <div class="scroll-area">
+        <div class="settings-card">
+          <div class="settings-card-title">🖥 Docker Hosts</div>
+          <div id="hosts-list" style="margin-bottom:14px"></div>
+          <div style="display:flex;gap:6px;flex-wrap:wrap">
+            <input class="form-input" id="new-host-name" placeholder="Name (e.g. NAS-Q1)" style="flex:1;min-width:110px">
+            <input class="form-input" id="new-host-ip" placeholder="IP address" style="flex:1.2;min-width:130px">
+            <input class="form-input" id="new-host-port" type="number" value="2376" style="flex:0 0 84px">
+            <button class="btn btn-primary" id="add-host-btn">Add host</button>
+          </div>
+          <div class="form-hint" style="margin-top:8px">Each host can have its own TLS certificates — use "Certs…" on the host row after adding it.</div>
+        </div>
+
+        <div class="settings-card">
+          <div class="settings-card-title">🎨 Appearance</div>
+          <div class="form-group">
+            <label class="form-label">Theme</label>
+            <div class="seg-group" id="theme-picker">
+              <button class="seg-btn" data-theme-opt="system">System</button>
+              <button class="seg-btn" data-theme-opt="dark">Dark</button>
+              <button class="seg-btn" data-theme-opt="light">Light</button>
+            </div>
+          </div>
+          <div class="form-group" style="margin-bottom:4px">
+            <label class="form-label">Logo & Dock icon</label>
+            <div class="logo-swatches" id="logo-picker">
+              <div class="logo-swatch" data-logo="teal" title="Teal"><img src="icons/logo-teal.png"></div>
+              <div class="logo-swatch" data-logo="violet" title="Violet"><img src="icons/logo-violet.png"></div>
+              <div class="logo-swatch" data-logo="sunset" title="Sunset"><img src="icons/logo-sunset.png"></div>
+              <div class="logo-swatch" data-logo="mono" title="Mono"><img src="icons/logo-mono.png"></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="settings-card">
+          <div class="settings-card-title">🚀 Startup &amp; Menu Bar</div>
+          <div class="switch-row" style="margin-bottom:10px">
+            <input type="checkbox" id="setting-autostart">
+            <label for="setting-autostart" style="font-size:13px;cursor:pointer">Launch Portside when you log in</label>
+          </div>
+          <div class="switch-row">
+            <input type="checkbox" id="setting-tray" checked>
+            <label for="setting-tray" style="font-size:13px;cursor:pointer">Show menu bar companion</label>
+          </div>
+          <div class="form-hint" style="margin-top:6px">With the menu bar icon off, closing the window quits the app (no background monitoring or notifications).</div>
+        </div>
+
+        <div class="settings-card">
+          <div class="settings-card-title">🔐 TLS Certificates</div>
+          <div id="cert-status" style="margin-bottom:12px"></div>
+          <div style="display:flex;gap:8px">
+            <button class="btn btn-primary" id="cert-import-btn">Import certificates…</button>
+            <button class="btn" id="cert-reset-btn" style="display:none">Revert to bundled</button>
+          </div>
+          <div class="form-hint" style="margin-top:8px">Select your ca.pem, cert.pem and key.pem from a new Container Station export — they're sorted automatically.</div>
+        </div>
+
+        <div class="settings-card">
+          <div class="settings-card-title">ℹ️ About Portside</div>
+          <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
+            <span class="cert-pill custom" id="about-version">v—</span>
+            <span id="about-update-status" style="font-size:12px;color:var(--text-muted)"></span>
+          </div>
+          <div style="display:flex;gap:8px">
+            <button class="btn btn-primary" id="check-app-update-btn">Check for updates</button>
+            <button class="btn" id="open-github-btn">GitHub ↗</button>
+          </div>
+          <div class="form-hint" style="margin-top:8px">Portside checks for new releases daily. Updates are downloaded from GitHub as a fresh DMG.</div>
+        </div>
+
+        <div class="settings-card">
+          <div class="settings-card-title">⚙️ Auto Refresh</div>
+          <div class="form-group">
+            <label class="form-label">Refresh Interval</label>
+            <select class="form-input" id="setting-interval" style="cursor:pointer">
+              <option value="0">Manual only</option>
+              <option value="5000">Every 5 seconds</option>
+              <option value="10000" selected>Every 10 seconds</option>
+              <option value="30000">Every 30 seconds</option>
+              <option value="60000">Every minute</option>
+            </select>
+          </div>
+          <button class="btn btn-primary" id="save-interval-btn">Apply</button>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /main -->
+</div><!-- /app -->
+
+<!-- Detail panel (slide from right) -->
+<div id="detail-panel">
+  <div class="detail-header">
+    <span class="status-badge running" id="detail-status-badge">running</span>
+    <span class="detail-title" id="detail-title">Container Name</span>
+    <button class="btn btn-icon" id="detail-close-btn" title="Close">✕</button>
+  </div>
+  <div class="detail-scroll">
+    <!-- Actions -->
+    <div id="detail-actions" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:16px"></div>
+
+    <!-- Stats gauges -->
+    <div class="detail-section">
+      <div class="detail-section-title">Live Stats</div>
+      <div class="stat-gauge">
+        <div class="stat-gauge-header">
+          <span class="stat-gauge-label">CPU</span>
+          <span class="stat-gauge-value" id="detail-cpu-val">—</span>
+        </div>
+        <div class="stat-gauge-bar"><div class="stat-gauge-fill" id="detail-cpu-bar" style="width:0%"></div></div>
+      </div>
+      <div class="stat-gauge">
+        <div class="stat-gauge-header">
+          <span class="stat-gauge-label">Memory</span>
+          <span class="stat-gauge-value" id="detail-mem-val">—</span>
+        </div>
+        <div class="stat-gauge-bar"><div class="stat-gauge-fill" id="detail-mem-bar" style="width:0%"></div></div>
+      </div>
+      <div class="stat-gauge">
+        <div class="stat-gauge-header">
+          <span class="stat-gauge-label">Memory Used</span>
+          <span class="stat-gauge-value" id="detail-mem-used">—</span>
+        </div>
+        <div class="stat-gauge-bar"><div class="stat-gauge-fill" id="detail-mem-abs" style="width:0%"></div></div>
+      </div>
+      <div style="display:flex;gap:14px;margin-top:8px">
+        <div><div style="font-size:10px;color:var(--text-muted)">NET I/O</div><div style="font-size:11px" id="detail-net">—</div></div>
+        <div><div style="font-size:10px;color:var(--text-muted)">BLOCK I/O</div><div style="font-size:11px" id="detail-block">—</div></div>
+        <div><div style="font-size:10px;color:var(--text-muted)">PIDs</div><div style="font-size:11px" id="detail-pids">—</div></div>
+      </div>
+    </div>
+
+    <!-- Info -->
+    <div class="detail-section" id="detail-info"></div>
+
+    <!-- Ports -->
+    <div class="detail-section" id="detail-ports-section" style="display:none">
+      <div class="detail-section-title">Ports</div>
+      <div id="detail-ports"></div>
+    </div>
+
+    <!-- Env -->
+    <div class="detail-section" id="detail-env-section" style="display:none">
+      <div class="detail-section-title">Environment</div>
+      <div id="detail-env" style="font-family:monospace;font-size:11px;color:var(--text-muted);max-height:140px;overflow-y:auto"></div>
+    </div>
+
+    <!-- Log button -->
+    <button class="btn" id="detail-logs-btn" style="width:100%;justify-content:center;margin-top:4px">📋 View Logs</button>
+  </div>
+</div>
+
+<!-- Log panel (live stream) -->
+<div id="log-panel">
+  <div class="log-header">
+    <div id="log-live-dot"></div>
+    <span class="log-title" id="log-title">Logs</span>
+    <input id="log-search" placeholder="Search…  ⏎ next  ⇧⏎ prev" spellcheck="false">
+    <button class="btn btn-icon" id="log-pause-btn" title="Pause stream">⏸</button>
+    <button class="btn btn-icon" id="log-close-btn" title="Close">✕</button>
+  </div>
+  <div id="log-output-term"></div>
+</div>
+
+<!-- File editor modal -->
+<div class="modal-overlay" id="editor-modal">
+  <div class="modal">
+    <div class="modal-header">
+      <span style="font-size:15px">📝</span>
+      <span class="modal-title" id="editor-title">Edit file</span>
+      <button class="btn btn-icon" id="editor-close-btn">✕</button>
+    </div>
+    <div class="modal-body" style="padding:12px 16px">
+      <textarea id="editor-textarea" spellcheck="false"></textarea>
+    </div>
+    <div class="modal-footer">
+      <button class="btn" id="editor-cancel-btn">Cancel</button>
+      <button class="btn btn-primary" id="editor-save-btn">Save to container</button>
+    </div>
+  </div>
+</div>
+
+<!-- Deploy modal -->
+<div class="modal-overlay" id="deploy-modal">
+  <div class="modal" style="width:640px">
+    <div class="modal-header">
+      <span style="font-size:15px">🚀</span>
+      <span class="modal-title">Deploy a new container</span>
+      <button class="btn btn-icon" id="deploy-close-btn">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="deploy-label" style="margin-top:0">Image</div>
+      <input class="form-input" id="dep-image" placeholder="e.g. linuxserver/overseerr:latest" spellcheck="false">
+      <div class="deploy-label">Container name</div>
+      <input class="form-input" id="dep-name" placeholder="e.g. overseerr (optional)" spellcheck="false">
+      <div class="deploy-label">Ports (host → container)</div>
+      <div id="dep-ports"></div>
+      <span class="kv-add" data-add="ports">+ Add port</span>
+      <div class="deploy-label">Volumes (host path → container path)</div>
+      <div id="dep-vols"></div>
+      <span class="kv-add" data-add="vols">+ Add volume</span>
+      <div class="deploy-label">Environment variables</div>
+      <div id="dep-envs"></div>
+      <span class="kv-add" data-add="envs">+ Add variable</span>
+      <div style="display:flex;gap:14px">
+        <div style="flex:1">
+          <div class="deploy-label">Restart policy</div>
+          <select class="form-input" id="dep-restart">
+            <option value="unless-stopped" selected>unless-stopped</option>
+            <option value="always">always</option>
+            <option value="on-failure">on-failure</option>
+            <option value="no">no</option>
+          </select>
+        </div>
+        <div style="flex:1">
+          <div class="deploy-label">Network</div>
+          <select class="form-input" id="dep-network"><option value="">default (bridge)</option></select>
+        </div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <span id="deploy-status" style="font-size:11px;color:var(--text-muted);margin-right:auto;align-self:center"></span>
+      <button class="btn" id="deploy-cancel-btn">Cancel</button>
+      <button class="btn btn-success" id="deploy-go-btn">Deploy</button>
+    </div>
+  </div>
+</div>
+
+<!-- Toast container -->
+<div id="toast-container"></div>
+
+<script src="node_modules/@xterm/xterm/lib/xterm.js"></script>
+<script src="node_modules/@xterm/addon-fit/lib/addon-fit.js"></script>
+<script src="node_modules/@xterm/addon-search/lib/addon-search.js"></script>
+<script>
+// ─── State ────────────────────────────────────────────────────────────────────
+const state = {
+  config: { host: '', port: 2376 },
+  containers: [],
+  images: [],
+  volumes: [],
+  networks: [],
+  selectedContainer: null,
+  statsCache: {},
+  refreshTimer: null,
+  refreshInterval: 10000,
+  showAllContainers: false,
+  hostInfo: null,
+  history: { t: [], cpu: [], mem: [], rx: [], tx: [] },
+  prevNet: null,
+  prevPerIO: {},
+  inspectCache: {},
+  inspectFetched: 0,
+  prevRunningIds: null,
+  lastPer: [],
+  df: null,
+  dfFetched: 0
+};
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+const $ = id => document.getElementById(id);
+const api = window.portside;
+
+function fmt(bytes) {
+  if (!bytes) return '0 B';
+  const u = ['B','KB','MB','GB','TB'];
+  let i = 0;
+  while (bytes >= 1024 && i < u.length - 1) { bytes /= 1024; i++; }
+  return bytes.toFixed(i === 0 ? 0 : 1) + ' ' + u[i];
+}
+function fmtTime(ts) {
+  if (!ts) return '—';
+  const d = new Date(ts * 1000);
+  const now = new Date();
+  const diff = Math.floor((now - d) / 1000);
+  if (diff < 60) return diff + 's ago';
+  if (diff < 3600) return Math.floor(diff/60) + 'm ago';
+  if (diff < 86400) return Math.floor(diff/3600) + 'h ago';
+  return Math.floor(diff/86400) + 'd ago';
+}
+function sanitizeName(name) {
+  return (name || '').replace(/^\//, '');
+}
+function statusClass(s) {
+  if (!s) return 'created';
+  if (s.startsWith('Up')) return 'running';
+  if (s.startsWith('Exited')) return 'exited';
+  if (s.startsWith('Paused')) return 'paused';
+  if (s.startsWith('Restarting')) return 'restarting';
+  return 'created';
+}
+function toast(msg, type = 'info', dur = 3000) {
+  const icons = { success:'✓', error:'✕', info:'ℹ' };
+  const t = document.createElement('div');
+  t.className = `toast ${type}`;
+  t.innerHTML = `<span>${icons[type]}</span><span>${msg}</span>`;
+  $('toast-container').appendChild(t);
+  setTimeout(() => t.remove(), dur);
+}
+
+// ─── Navigation ───────────────────────────────────────────────────────────────
+document.querySelectorAll('.nav-item').forEach(item => {
+  item.addEventListener('click', () => {
+    const pg = item.dataset.page;
+    document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+    item.classList.add('active');
+    document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+    $('page-' + pg).classList.add('active');
+    loadPage(pg);
+  });
+});
+
+function loadPage(pg) {
+  if (pg === 'dashboard') loadDashboard();
+  if (pg === 'containers') renderContainersList();
+  if (pg === 'images') loadImages();
+  if (pg === 'volumes') loadVolumes();
+  if (pg === 'networks') loadNetworks();
+  if (pg === 'terminal') setupTerminalPage();
+  if (pg === 'files') setupFilesPage();
+  if (pg === 'events') loadEvents();
+  if (pg === 'settings') loadSettings();
+}
+
+// ─── Activity feed ────────────────────────────────────────────────────────────
+const EVENT_META = {
+  start: ['▶', 'good'], unpause: ['▶', 'good'], create: ['＋', 'good'],
+  die: ['💀', 'bad'], kill: ['■', 'bad'], stop: ['■', 'bad'], destroy: ['✕', 'bad'], oom: ['🚨', 'bad'],
+  restart: ['↻', 'warn'], pause: ['⏸', 'warn'], rename: ['✎', ''],
+  pull: ['⬇', 'good'], delete: ['🗑', 'warn'], untag: ['🏷', ''], tag: ['🏷', '']
+};
+
+function eventRowHtml(ev) {
+  const base = (ev.action || '').split(':')[0].split(' ')[0];
+  const [icon, cls] = EVENT_META[base] || (base.startsWith('health_status') ? ['🩺', /unhealthy/.test(ev.action) ? 'bad' : 'good'] : ['•', '']);
+  const time = new Date(ev.t).toLocaleTimeString();
+  return `<div class="event-row">
+    <span class="event-time">${time}</span>
+    <span class="event-icon">${icon}</span>
+    <span class="event-action ${cls}">${base.replace('health_status', 'health')}</span>
+    <span class="event-name">${ev.name}${ev.type !== 'container' ? ` <span class="event-extra">(${ev.type})</span>` : ''}</span>
+    <span class="event-extra">${ev.extra || ''}</span>
+  </div>`;
+}
+
+async function loadEvents() {
+  const evs = await api.events.list({ host: state.config.host });
+  $('events-list').innerHTML = evs.length
+    ? evs.slice().reverse().map(eventRowHtml).join('')
+    : '<div class="empty-state"><div class="empty-icon">☷</div><div class="empty-title">No events yet</div><div class="empty-sub">Container starts, stops, crashes and image pulls will appear here in real time.</div></div>';
+}
+
+api.events.onItem((ev) => {
+  if (ev.host !== state.config.host) return;
+  if (!$('page-events').classList.contains('active')) return;
+  const list = $('events-list');
+  if (list.querySelector('.empty-state')) { list.innerHTML = eventRowHtml(ev); return; }
+  list.insertAdjacentHTML('afterbegin', eventRowHtml(ev));
+  while (list.children.length > 300) list.lastElementChild.remove();
+});
+
+// ─── Theme & logo ─────────────────────────────────────────────────────────────
+const LOGO_PALETTES = {
+  teal:   ['#1d4ed8','#2563eb','#3b82f6','#0284c7','#0ea5e9','#38bdf8','#0d9488','#14b8a6','#2dd4bf'],
+  violet: ['#4f46e5','#6366f1','#818cf8','#7c3aed','#8b5cf6','#a78bfa','#9333ea','#a855f7','#c084fc'],
+  sunset: ['#dc2626','#ef4444','#f87171','#ea580c','#f97316','#fb923c','#d97706','#f59e0b','#fbbf24'],
+  mono:   ['#334155','#475569','#64748b','#526079','#64748b','#94a3b8','#5b6b7f','#7c8aa0','#cbd5e1']
+};
+const sysThemeMq = window.matchMedia('(prefers-color-scheme: light)');
+
+function applyTheme(mode) {
+  const effective = mode === 'system' ? (sysThemeMq.matches ? 'light' : 'dark') : mode;
+  document.documentElement.dataset.theme = effective;
+  document.querySelectorAll('#theme-picker .seg-btn').forEach(b =>
+    b.classList.toggle('active', b.dataset.themeOpt === mode));
+}
+sysThemeMq.addEventListener('change', () => {
+  if ((state.config.theme || 'system') === 'system') applyTheme('system');
+});
+
+function applyLogo(variant) {
+  const pal = LOGO_PALETTES[variant] || LOGO_PALETTES.teal;
+  document.querySelectorAll('#titlebar svg polygon').forEach((poly, i) => {
+    if (i < 9) poly.setAttribute('fill', pal[i]);
+  });
+  api.appx.setDockIcon(variant);
+  document.querySelectorAll('#logo-picker .logo-swatch').forEach(s =>
+    s.classList.toggle('active', s.dataset.logo === variant));
+}
+
+function saveCfg(patch) {
+  state.config = { ...state.config, ...patch };
+  api.config.save(state.config);
+}
+
+// ─── Multi-host ───────────────────────────────────────────────────────────────
+function migrateHosts() {
+  const c = state.config;
+  if (!c.hosts || !c.hosts.length) {
+    c.hosts = c.host ? [{ id: 'h' + Date.now().toString(36), name: 'NAS', host: c.host, port: c.port || 2376 }] : [];
+    c.activeHostId = c.hosts[0] ? c.hosts[0].id : null;
+    api.config.save(c);
+  }
+  syncActiveHost();
+}
+
+function activeHost() {
+  return (state.config.hosts || []).find(h => h.id === state.config.activeHostId) || (state.config.hosts || [])[0];
+}
+
+function syncActiveHost() {
+  const h = activeHost();
+  if (h) { state.config.host = h.host; state.config.port = h.port; }
+  renderHostSwitcher();
+}
+
+function renderHostSwitcher() {
+  const sel = $('host-switcher');
+  const hosts = state.config.hosts || [];
+  if (hosts.length < 2) { sel.style.display = 'none'; return; }
+  sel.style.display = '';
+  sel.innerHTML = hosts.map(h => `<option value="${h.id}"${h.id === state.config.activeHostId ? ' selected' : ''}>${h.name}</option>`).join('');
+}
+
+async function switchHost(id) {
+  const h = (state.config.hosts || []).find(x => x.id === id);
+  if (!h) return;
+  saveCfg({ activeHostId: id });
+  syncActiveHost();
+  // Reset per-host state
+  state.containers = []; state.images = []; state.volumes = []; state.networks = [];
+  state.statsCache = {}; state.prevNet = null; state.prevPerIO = {}; state.prevRunningIds = null;
+  state.inspectCache = {}; state.inspectFetched = 0; state.df = null; state.dfFetched = 0;
+  state.updates = null; state.lastPer = [];
+  state.history = { t: [], cpu: [], mem: [], rx: [], tx: [] };
+  toast(`Switched to ${h.name}`, 'info');
+  api.events.start({ host: h.host, port: h.port });
+  await loadDashboard();
+  checkUpdates(false);
+}
+
+$('host-switcher').addEventListener('change', (e) => switchHost(e.target.value));
+
+// ─── Init ─────────────────────────────────────────────────────────────────────
+async function init() {
+  state.config = await api.config.load();
+  migrateHosts();
+
+  applyTheme(state.config.theme || 'system');
+  applyLogo(state.config.logo || 'teal');
+  if (state.config.refreshInterval !== undefined) {
+    state.refreshInterval = state.config.refreshInterval;
+    $('setting-interval').value = String(state.refreshInterval);
+  }
+
+  const deepLink = new URLSearchParams(location.search).get('page');
+  if (deepLink) {
+    showPage(deepLink);
+    if (state.config.host) { await loadDashboard(); startAutoRefresh(); }
+    loadPage(deepLink);
+  } else if (state.config.host) {
+    await loadDashboard();
+    startAutoRefresh();
+  } else {
+    showPage('settings');
+    loadSettings();
+    toast('Enter your QNAP IP to get started', 'info', 5000);
+  }
+  if (state.config.host) {
+    checkUpdates(false);
+    setInterval(() => checkUpdates(true), 6 * 3600e3);
+    api.events.start({ host: state.config.host, port: state.config.port });
+  }
+}
+
+// ─── Portside self-update ─────────────────────────────────────────────────────
+async function checkAppUpdate(announce) {
+  const r = await api.appUpdate.check();
+  if (!r.ok) { if (announce) toast('Update check failed: ' + r.error, 'error'); return; }
+  state.appUpdate = r;
+  $('about-version').textContent = 'v' + r.current;
+  if (r.newer) {
+    $('about-update-status').innerHTML = `🎉 v${r.latest} available — <span class="crumb" id="get-update-link">download from GitHub</span>`;
+    document.getElementById('get-update-link').addEventListener('click', () => api.openUrl(r.url));
+    if (announce) toast(`Portside v${r.latest} is available — see Settings`, 'info', 6000);
+    renderInsights(state.lastPer || []);
+  } else if (announce) {
+    $('about-update-status').textContent = `You're on the latest version ✓`;
+    toast('Portside is up to date ✓', 'success');
+  }
+}
+
+$('check-app-update-btn').addEventListener('click', () => checkAppUpdate(true));
+$('open-github-btn').addEventListener('click', () => api.openUrl('https://github.com/Mac2100/portside'));
+api.appUpdate.version().then(v => { $('about-version').textContent = 'v' + v; });
+setTimeout(() => checkAppUpdate(false), 8000);
+setInterval(() => checkAppUpdate(false), 24 * 3600e3);
+
+async function checkUpdates(force, announce) {
+  const btn = $('updates-btn');
+  btn.disabled = true; btn.textContent = '⬆ Checking…';
+  const r = await api.updates.check({ ...state.config, force });
+  btn.disabled = false; btn.textContent = '⬆ Check updates';
+  if (!r.ok) { if (announce) toast('Update check failed: ' + r.error, 'error'); return; }
+  state.updates = r;
+  const n = r.results.filter(u => u.updateAvailable).length;
+  if (announce) toast(n ? `${n} image update${n > 1 ? 's' : ''} available` : 'Everything is up to date ✓', n ? 'info' : 'success');
+  renderInsights(state.lastPer || []);
+}
+
+$('updates-btn').addEventListener('click', () => checkUpdates(true, true));
+
+function showPage(name) {
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.toggle('active', n.dataset.page === name));
+  document.querySelectorAll('.page').forEach(p => p.classList.toggle('active', p.id === 'page-' + name));
+}
+
+// ─── Dashboard: Metrics & Insights ────────────────────────────────────────────
+function computeContainerStats(s, ncpuFallback) {
+  const cpuDelta = s.cpu_stats.cpu_usage.total_usage - (s.precpu_stats.cpu_usage.total_usage || 0);
+  const sysDelta = s.cpu_stats.system_cpu_usage - (s.precpu_stats.system_cpu_usage || 0);
+  const cpus = s.cpu_stats.online_cpus || (s.cpu_stats.cpu_usage.percpu_usage || []).length || ncpuFallback || 1;
+  const cpu = sysDelta > 0 ? (cpuDelta / sysDelta) * cpus * 100 : 0;
+  const memUsed = (s.memory_stats.usage || 0) - (s.memory_stats.stats?.cache || 0);
+  const memPct = s.memory_stats.limit > 0 ? (memUsed / s.memory_stats.limit) * 100 : 0;
+  const nets = s.networks || {};
+  const rx = Object.values(nets).reduce((a, n) => a + (n.rx_bytes || 0), 0);
+  const tx = Object.values(nets).reduce((a, n) => a + (n.tx_bytes || 0), 0);
+  return { cpu, memUsed, memPct, rx, tx };
+}
+
+async function loadDashboard() {
+  if (!state.config.host) return;
+  const conn = await api.docker.info(state.config);
+  if (conn.ok) {
+    setConnected(true);
+    const info = state.hostInfo = conn.data;
+    $('info-docker-ver').textContent = info.ServerVersion || '—';
+    $('info-cpus').textContent = info.NCPU || '—';
+    $('info-mem').textContent = fmt(info.MemTotal);
+    $('info-os').textContent = info.OperatingSystem || '—';
+    $('info-host').textContent = info.Name || '—';
+    $('docker-info-strip').style.display = '';
+    $('docker-version-label').textContent = `Docker ${info.ServerVersion} • ${info.Name}`;
+  } else {
+    setConnected(false);
+    return;
+  }
+
+  const r = await api.docker.containers(state.config);
+  if (!r.ok) return;
+  state.containers = r.data || [];
+  const running = state.containers.filter(c => (c.State || '').toLowerCase() === 'running');
+  $('nav-running-count').textContent = running.length;
+
+  const [ir, vr, nr] = await Promise.all([
+    api.docker.images(state.config),
+    api.docker.volumes(state.config),
+    api.docker.networks(state.config)
+  ]);
+  if (ir.ok) { state.images = ir.data || []; $('nav-images-count').textContent = state.images.length; }
+  if (vr.ok) { state.volumes = (vr.data && vr.data.Volumes) || []; $('nav-volumes-count').textContent = state.volumes.length; }
+  if (nr.ok) { state.networks = nr.data || []; $('nav-networks-count').textContent = state.networks.length; }
+
+  // Notify if a previously-running container stopped
+  const runningIds = new Set(running.map(c => c.Id));
+  if (state.prevRunningIds) {
+    for (const id of state.prevRunningIds) {
+      if (!runningIds.has(id)) {
+        const c = state.containers.find(x => x.Id === id);
+        if (c) try { new Notification('Portside', { body: `${sanitizeName(c.Names && c.Names[0])} stopped — ${c.Status || ''}` }); } catch {}
+      }
+    }
+  }
+  state.prevRunningIds = runningIds;
+
+  // Per-container stats in parallel → aggregate to host level
+  const info = state.hostInfo || {};
+  const ncpu = info.NCPU || 1;
+  const now = Date.now();
+  const statsResults = await Promise.all(running.map(async c => {
+    const res = await api.docker.stats({ ...state.config, id: c.Id });
+    return { c, s: (res.ok && res.data && res.data.cpu_stats) ? res.data : null };
+  }));
+
+  let cpuSum = 0, memSum = 0, rxSum = 0, txSum = 0;
+  const per = [];
+  for (const { c, s } of statsResults) {
+    if (!s) continue;
+    const m = computeContainerStats(s, ncpu);
+    cpuSum += m.cpu; memSum += m.memUsed; rxSum += m.rx; txSum += m.tx;
+
+    // Per-container net/disk rates from deltas
+    const blk = (s.blkio_stats?.io_service_bytes_recursive || []).reduce((a, x) => a + (x.value || 0), 0);
+    const prev = state.prevPerIO[c.Id];
+    let netRate = 0, blkRate = 0;
+    if (prev) {
+      const dt = (now - prev.t) / 1000;
+      if (dt > 0.5) {
+        netRate = Math.max(0, ((m.rx + m.tx) - prev.net) / dt);
+        blkRate = Math.max(0, (blk - prev.blk) / dt);
+      }
+    }
+    state.prevPerIO[c.Id] = { net: m.rx + m.tx, blk, t: now };
+
+    per.push({ id: c.Id, name: sanitizeName(c.Names && c.Names[0]), cpu: m.cpu, mem: m.memUsed, memPct: m.memPct, netRate, blkRate });
+  }
+  state.lastPer = per;
+
+  // Inspect running containers every 60s (restart counts, health checks)
+  if (now - state.inspectFetched > 60000 && running.length) {
+    state.inspectFetched = now;
+    Promise.all(running.map(c =>
+      api.docker.inspect({ ...state.config, id: c.Id }).then(r => [c.Id, r.ok ? r.data : null]).catch(() => [c.Id, null])
+    )).then(entries => {
+      state.inspectCache = Object.fromEntries(entries.filter(e => e[1]));
+      renderInsights(state.lastPer);
+    });
+  }
+
+  const hostCpu = Math.min(cpuSum / ncpu, 100);
+  const memTotal = info.MemTotal || 0;
+  const hostMem = memTotal > 0 ? (memSum / memTotal) * 100 : 0;
+
+  // Network rates (delta between refreshes)
+  let rxRate = 0, txRate = 0;
+  if (state.prevNet) {
+    const dt = (now - state.prevNet.time) / 1000;
+    if (dt > 0.5) {
+      rxRate = Math.max(0, (rxSum - state.prevNet.rx) / dt);
+      txRate = Math.max(0, (txSum - state.prevNet.tx) / dt);
+    }
+  }
+  state.prevNet = { rx: rxSum, tx: txSum, time: now };
+
+  // Rolling history (last 120 samples) + persist to disk for 24h/7d views
+  const H = state.history;
+  H.t.push(now); H.cpu.push(hostCpu); H.mem.push(hostMem); H.rx.push(rxRate); H.tx.push(txRate);
+  if (H.t.length > 120) { H.t.shift(); H.cpu.shift(); H.mem.shift(); H.rx.shift(); H.tx.shift(); }
+  api.history.append({ t: now, cpu: hostCpu, mem: hostMem, rx: rxRate, tx: txRate, host: state.config.host });
+
+  // Rings + cards
+  setRing('ring-cpu', hostCpu);
+  $('metric-cpu-val').textContent = hostCpu.toFixed(1) + '%';
+  $('metric-cpu-sub').textContent = `${ncpu} cores • ${running.length} active`;
+  setRing('ring-mem', hostMem);
+  $('metric-mem-val').textContent = fmt(memSum);
+  $('metric-mem-sub').textContent = 'of ' + fmt(memTotal);
+  const contPct = state.containers.length ? (running.length / state.containers.length) * 100 : 0;
+  setRing('ring-cont', contPct, `${running.length}/${state.containers.length}`, true);
+  $('metric-cont-val').textContent = `${running.length} of ${state.containers.length}`;
+  $('metric-cont-sub').textContent = `${state.containers.length - running.length} stopped`;
+  $('metric-net-val').textContent = `↓${fmt(rxRate)}/s ↑${fmt(txRate)}/s`;
+
+  // Charts
+  $('chart-cpu-now').textContent = hostCpu.toFixed(1) + '%';
+  $('chart-mem-now').textContent = `${hostMem.toFixed(1)}% (${fmt(memSum)})`;
+  $('chart-net-now').textContent = `↓${fmt(rxRate)}/s ↑${fmt(txRate)}/s`;
+  drawAllCharts();
+
+  // Disk usage via /system/df (refreshed every 60s; can be slow on QNAP)
+  if (now - state.dfFetched > 60000) {
+    state.dfFetched = now;
+    api.docker.df(state.config).then(d => {
+      if (d.ok) { state.df = d.data; renderInsights(per); }
+    }).catch(() => {});
+  }
+
+  renderTopLists(per);
+  renderInsights(per);
+  $('last-refresh').textContent = '• updated ' + new Date().toLocaleTimeString();
+
+  // Feed the menu bar companion popover
+  api.tray.update({
+    cfg: { host: state.config.host, port: state.config.port },
+    cpu: hostCpu,
+    memPct: hostMem,
+    memStr: fmt(memSum),
+    running: running.length,
+    total: state.containers.length,
+    alerts: state.alertCount || 0,
+    history: H.cpu.slice(-40),
+    theme: state.config.theme || 'system',
+    logo: state.config.logo || 'teal',
+    containers: state.containers.slice(0, 30).map(c => {
+      const p = per.find(x => x.id === c.Id);
+      return {
+        id: c.Id,
+        name: sanitizeName(c.Names && c.Names[0]),
+        state: (c.State || '').toLowerCase(),
+        cpu: p ? p.cpu : null
+      };
+    })
+  });
+}
+
+// ─── Top consumer lists ───────────────────────────────────────────────────────
+function renderTopLists(per) {
+  const mk = (list, valOf, fmtv, max, hotAt) => list.slice(0, 5).map(p => {
+    const v = valOf(p);
+    const pct = max > 0 ? Math.min((v / max) * 100, 100) : 0;
+    return `<div class="top-row" data-cid="${p.id}">
+      <span class="top-name truncate">${p.name}</span>
+      <div class="top-bar"><div class="top-bar-fill${hotAt && v > hotAt ? ' hot' : ''}" style="width:${pct}%"></div></div>
+      <span class="top-val">${fmtv(p)}</span>
+    </div>`;
+  }).join('') || '<div style="padding:8px 0;color:var(--text-muted);font-size:11px">No running containers</div>';
+
+  const byCpu = [...per].sort((a, b) => b.cpu - a.cpu);
+  $('top-cpu-list').innerHTML = mk(byCpu, p => p.cpu, p => p.cpu.toFixed(1) + '%', Math.max(byCpu[0]?.cpu || 1, 10), 80);
+  const byMem = [...per].sort((a, b) => b.mem - a.mem);
+  $('top-mem-list').innerHTML = mk(byMem, p => p.mem, p => fmt(p.mem), byMem[0]?.mem || 1, Infinity);
+
+  document.querySelectorAll('#top-cpu-list .top-row, #top-mem-list .top-row').forEach(r =>
+    r.addEventListener('click', () => openDetail(r.dataset.cid)));
+}
+
+// ─── Ring gauges ──────────────────────────────────────────────────────────────
+function setRing(id, pct, label, invertColor) {
+  const el = $(id);
+  pct = Math.max(0, Math.min(pct || 0, 100));
+  const R = 28, C = 2 * Math.PI * R;
+  if (!el.dataset.init) {
+    el.innerHTML = `<svg width="64" height="64" viewBox="0 0 64 64">
+      <circle class="ring-track" cx="32" cy="32" r="${R}"/>
+      <circle class="ring-fill" cx="32" cy="32" r="${R}" stroke-dasharray="${C}" stroke-dashoffset="${C}"/>
+    </svg><div class="ring-label"></div>`;
+    el.dataset.init = '1';
+  }
+  const fill = el.querySelector('.ring-fill');
+  fill.style.stroke = invertColor ? '#3fb950' : (pct < 60 ? '#3fb950' : pct < 80 ? '#d29922' : '#f85149');
+  fill.style.strokeDashoffset = C * (1 - pct / 100);
+  el.querySelector('.ring-label').textContent = label !== undefined ? label : pct.toFixed(0) + '%';
+}
+
+// ─── Chart ranges (Live / 24h / 7d) ───────────────────────────────────────────
+state.chartRange = 'live';
+
+async function drawAllCharts() {
+  let cpu, mem, rx, tx;
+  if (state.chartRange === 'live') {
+    ({ cpu, mem, rx, tx } = state.history);
+  } else {
+    const ms = state.chartRange === '24h' ? 86400e3 : 7 * 86400e3;
+    const h = await api.history.get({ ms, host: state.config.host });
+    cpu = h.cpu; mem = h.mem; rx = h.rx; tx = h.tx;
+  }
+  drawChart('chart-cpu', [{ data: cpu, color: '#58a6ff' }], 100);
+  drawChart('chart-mem', [{ data: mem, color: '#bc8cff' }], 100);
+  drawChart('chart-net', [{ data: rx, color: '#3fb950' }, { data: tx, color: '#d29922' }]);
+}
+
+document.querySelectorAll('#range-picker .seg-btn').forEach(b =>
+  b.addEventListener('click', () => {
+    state.chartRange = b.dataset.range;
+    document.querySelectorAll('#range-picker .seg-btn').forEach(x => x.classList.toggle('active', x === b));
+    drawAllCharts();
+  }));
+
+// ─── Canvas charts ────────────────────────────────────────────────────────────
+function drawChart(id, series, fixedMax) {
+  const cv = $(id);
+  if (!cv) return;
+  const dpr = window.devicePixelRatio || 1;
+  const w = cv.clientWidth || 400, h = cv.clientHeight || 110;
+  cv.width = w * dpr; cv.height = h * dpr;
+  const ctx = cv.getContext('2d');
+  ctx.scale(dpr, dpr);
+  ctx.clearRect(0, 0, w, h);
+
+  ctx.strokeStyle = 'rgba(48,54,61,0.55)';
+  ctx.lineWidth = 1;
+  for (let i = 1; i < 4; i++) {
+    const y = (h * i) / 4;
+    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke();
+  }
+
+  const allVals = series.flatMap(s => s.data);
+  if (!allVals.length) return;
+  const max = fixedMax || Math.max(...allVals, 1) * 1.25;
+
+  for (const s of series) {
+    const data = s.data;
+    if (data.length < 2) continue;
+    const n = Math.max(data.length, 30);
+    const step = w / (n - 1);
+    const x0 = w - (data.length - 1) * step;
+    const yOf = v => h - (Math.min(v, max) / max) * (h - 8) - 3;
+
+    ctx.beginPath();
+    data.forEach((v, i) => { const x = x0 + i * step; i === 0 ? ctx.moveTo(x, yOf(v)) : ctx.lineTo(x, yOf(v)); });
+    ctx.strokeStyle = s.color; ctx.lineWidth = 1.5; ctx.stroke();
+
+    ctx.lineTo(x0 + (data.length - 1) * step, h); ctx.lineTo(x0, h); ctx.closePath();
+    const g = ctx.createLinearGradient(0, 0, 0, h);
+    g.addColorStop(0, s.color + '4d'); g.addColorStop(1, s.color + '00');
+    ctx.fillStyle = g; ctx.fill();
+  }
+}
+
+// ─── Insights ─────────────────────────────────────────────────────────────────
+function renderInsights(per) {
+  const items = [];
+  const name1 = c => sanitizeName(c.Names && c.Names[0]);
+  const sevRank = { crit: 0, warn: 1, good: 2, '': 3 };
+
+  // — Resource alerts —
+  per.filter(p => p.cpu > 80).forEach(p =>
+    items.push({ sev: 'crit', icon: '🔥', cid: p.id, title: `High CPU — ${p.name}`, sub: 'Sustained load; click to inspect', value: p.cpu.toFixed(1) + '%' }));
+  per.filter(p => p.memPct > 85).forEach(p =>
+    items.push({ sev: 'warn', icon: '🧠', cid: p.id, title: `High memory — ${p.name}`, sub: fmt(p.mem) + ' in use', value: p.memPct.toFixed(0) + '%' }));
+
+  // Host memory pressure
+  const H = state.history;
+  const hostMemNow = H.mem[H.mem.length - 1] || 0;
+  if (hostMemNow > 88)
+    items.push({ sev: 'crit', icon: '🚨', title: 'Host memory pressure', sub: 'Container memory is squeezing the NAS — consider stopping something', value: hostMemNow.toFixed(0) + '%' });
+
+  // CPU trend over recent history
+  if (H.cpu.length >= 12) {
+    const recent = H.cpu.slice(-3).reduce((a, b) => a + b, 0) / 3;
+    const earlier = H.cpu.slice(-12, -3).reduce((a, b) => a + b, 0) / 9;
+    if (recent - earlier > 15)
+      items.push({ sev: 'warn', icon: '📈', title: 'CPU climbing', sub: `Up from ~${earlier.toFixed(0)}% to ~${recent.toFixed(0)}% over the last few minutes`, value: '' });
+  }
+
+  // — Health & stability —
+  state.containers.filter(c => /unhealthy/i.test(c.Status || '')).forEach(c =>
+    items.push({ sev: 'crit', icon: '⚠️', cid: c.Id, title: `Unhealthy — ${name1(c)}`, sub: c.Status, value: '' }));
+  state.containers.filter(c => /restarting/i.test(c.State || '')).forEach(c =>
+    items.push({ sev: 'warn', icon: '♻️', cid: c.Id, title: `Restart loop — ${name1(c)}`, sub: c.Status, value: '' }));
+
+  // Crashed containers (non-zero exit codes)
+  state.containers.forEach(c => {
+    const m = /Exited \((\d+)\)/.exec(c.Status || '');
+    if (m && m[1] !== '0')
+      items.push({ sev: 'warn', icon: '💥', cid: c.Id, title: `Crashed — ${name1(c)}`, sub: `${c.Status} • click for details`, value: 'exit ' + m[1] });
+  });
+
+  // Restart counts + health summary from inspect cache
+  const inspects = Object.entries(state.inspectCache);
+  inspects.forEach(([id, x]) => {
+    if ((x.RestartCount || 0) > 0) {
+      const c = state.containers.find(k => k.Id === id);
+      items.push({ sev: 'warn', icon: '🔁', cid: id, title: `${c ? name1(c) : id.slice(0, 12)} has restarted ${x.RestartCount}×`, sub: 'Docker restarted it after exits — check its logs', value: '' });
+    }
+  });
+  const withHealth = inspects.filter(([, x]) => x.State && x.State.Health);
+  if (withHealth.length) {
+    const healthy = withHealth.filter(([, x]) => x.State.Health.Status === 'healthy').length;
+    const starting = withHealth.filter(([, x]) => x.State.Health.Status === 'starting').length;
+    items.push({
+      sev: healthy === withHealth.length ? 'good' : '',
+      icon: '🩺', title: `Health checks: ${healthy}/${withHealth.length} passing`,
+      sub: starting ? `${starting} still starting up` : 'All defined health checks reporting',
+      value: ''
+    });
+  }
+
+  // — Activity —
+  const byNet = [...per].sort((a, b) => b.netRate - a.netRate);
+  if (byNet[0] && byNet[0].netRate > 50 * 1024)
+    items.push({ sev: '', icon: '🌐', cid: byNet[0].id, title: `Network hog — ${byNet[0].name}`, sub: 'Heaviest network traffic right now', value: fmt(byNet[0].netRate) + '/s' });
+  const byBlk = [...per].sort((a, b) => b.blkRate - a.blkRate);
+  if (byBlk[0] && byBlk[0].blkRate > 512 * 1024)
+    items.push({ sev: '', icon: '💿', cid: byBlk[0].id, title: `Disk hog — ${byBlk[0].name}`, sub: 'Heaviest disk I/O right now', value: fmt(byBlk[0].blkRate) + '/s' });
+
+  // Stopped containers
+  const exited = state.containers.filter(c => (c.State || '').toLowerCase() === 'exited');
+  if (exited.length)
+    items.push({ sev: '', icon: '💤', title: `${exited.length} stopped container${exited.length > 1 ? 's' : ''}`, sub: exited.slice(0, 4).map(name1).join(', ') + (exited.length > 4 ? '…' : ''), value: '' });
+
+  // — Portside itself has an update —
+  if (state.appUpdate && state.appUpdate.newer) {
+    items.push({
+      sev: '', icon: '🎁',
+      title: `Portside v${state.appUpdate.latest} is out`,
+      sub: `You're on v${state.appUpdate.current} — grab the new DMG from GitHub`,
+      value: '', action: '<button class="btn btn-primary" id="app-upd-btn">Get update</button>'
+    });
+  }
+
+  // — Image updates —
+  if (state.updates && state.updates.results) {
+    state.updates.results.filter(u => u.updateAvailable).forEach(u =>
+      items.push({
+        sev: 'warn', icon: '⬆️',
+        title: `Update available — ${u.shortName}`,
+        sub: `${u.image} • used by ${u.containers.map(c => c.name).join(', ')}`,
+        value: '',
+        action: `<button class="btn btn-warn upd-btn" data-img="${u.image}">Update</button>`
+      }));
+  }
+
+  // — Storage —
+  if (state.df) {
+    const layers = state.df.LayersSize || 0;
+    const volsArr = state.df.Volumes || [];
+    const vols = volsArr.reduce((a, v) => a + ((v.UsageData && v.UsageData.Size > 0) ? v.UsageData.Size : 0), 0);
+    items.push({ sev: '', icon: '💾', title: 'Storage', sub: `Images ${fmt(layers)} • Volumes ${fmt(vols)}`, value: '' });
+
+    const dangling = (state.df.Images || []).filter(i => !(i.RepoTags || []).length || i.RepoTags[0] === '<none>:<none>');
+    if (dangling.length) {
+      const reclaim = dangling.reduce((a, i) => a + (i.Size || 0), 0);
+      items.push({
+        sev: 'warn', icon: '🧹',
+        title: `${dangling.length} dangling image${dangling.length > 1 ? 's' : ''}`,
+        sub: `~${fmt(reclaim)} reclaimable`,
+        value: '', action: '<button class="btn btn-warn" id="prune-imgs-btn">Prune</button>'
+      });
+    }
+    const unusedVols = volsArr.filter(v => (v.UsageData && v.UsageData.RefCount === 0));
+    if (unusedVols.length) {
+      const sz = unusedVols.reduce((a, v) => a + ((v.UsageData && v.UsageData.Size > 0) ? v.UsageData.Size : 0), 0);
+      items.push({ sev: '', icon: '🗃️', title: `${unusedVols.length} unused volume${unusedVols.length > 1 ? 's' : ''}`, sub: `Not attached to any container${sz > 0 ? ' • ~' + fmt(sz) : ''}`, value: '' });
+    }
+  }
+
+  // — Sort by severity, count alerts, badge —
+  items.sort((a, b) => sevRank[a.sev] - sevRank[b.sev]);
+  const alerts = items.filter(i => i.sev === 'crit' || i.sev === 'warn').length;
+  if (!alerts) items.unshift({ sev: 'good', icon: '✓', title: 'All systems healthy', sub: 'No alerts across your containers', value: '' });
+
+  const badge = $('nav-alerts-count');
+  badge.style.display = alerts ? '' : 'none';
+  badge.textContent = alerts;
+  state.alertCount = alerts;
+  api.dockBadge(alerts);
+
+  $('insights-list').innerHTML = items.map(i => `
+    <div class="insight-item ${i.sev}${i.cid ? ' clickable' : ''}"${i.cid ? ` data-cid="${i.cid}"` : ''}>
+      <div class="insight-icon">${i.icon}</div>
+      <div class="insight-body"><div class="insight-title">${i.title}</div><div class="insight-sub">${i.sub}</div></div>
+      <div class="insight-value">${i.value}</div>
+      ${i.action ? `<div class="insight-action">${i.action}</div>` : ''}
+    </div>`).join('');
+
+  // Clickable insights → container detail
+  document.querySelectorAll('#insights-list .insight-item[data-cid]').forEach(el =>
+    el.addEventListener('click', () => openDetail(el.dataset.cid)));
+
+  // Update actions
+  document.querySelectorAll('.upd-btn').forEach(b => b.addEventListener('click', async (e) => {
+    e.stopPropagation();
+    const u = (state.updates?.results || []).find(x => x.image === b.dataset.img);
+    if (!u) return;
+    if (!confirm(`Update ${u.shortName}?\n\nThis pulls the new image and recreates: ${u.containers.map(c => c.name).join(', ')}.\nConfig, ports and volumes are preserved. If anything fails, the old container is restored.`)) return;
+    b.disabled = true; b.textContent = 'Updating…';
+    toast(`Pulling ${u.image} — this can take a few minutes…`, 'info', 8000);
+    for (const c of u.containers) {
+      const r = await api.updates.apply({ ...state.config, id: c.id });
+      if (r.ok) toast(`${c.name} updated ✓`, 'success', 5000);
+      else toast(`${c.name}: ${r.error}`, 'error', 8000);
+    }
+    const rc = await api.updates.check({ ...state.config, force: true });
+    if (rc.ok) state.updates = rc;
+    loadDashboard();
+  }));
+
+  // Portside update action
+  const ab = document.getElementById('app-upd-btn');
+  if (ab) ab.addEventListener('click', (e) => { e.stopPropagation(); api.openUrl(state.appUpdate.url); });
+
+  // Prune action
+  const pb = document.getElementById('prune-imgs-btn');
+  if (pb) pb.addEventListener('click', async (e) => {
+    e.stopPropagation();
+    pb.disabled = true; pb.textContent = 'Pruning…';
+    const r = await api.docker.pruneImages(state.config);
+    if (r.ok) {
+      toast(`Pruned ${(r.data?.ImagesDeleted || []).length} images — reclaimed ${fmt(r.data?.SpaceReclaimed || 0)}`, 'success');
+      state.dfFetched = 0;
+      loadDashboard();
+    } else {
+      toast('Prune failed: ' + r.error, 'error');
+      pb.disabled = false; pb.textContent = 'Prune';
+    }
+  });
+}
+
+function setConnected(ok) {
+  $('conn-dot').className = 'status-dot' + (ok ? ' connected' : '');
+  $('conn-label').textContent = ok ? `${state.config.host}:${state.config.port}` : 'Disconnected';
+}
+
+// ─── Container Table ──────────────────────────────────────────────────────────
+function renderContainerTable(targetId, containers) {
+  const el = $(targetId);
+  if (!containers || !containers.length) {
+    el.innerHTML = `<div class="empty-state"><div class="empty-icon">◫</div><div class="empty-title">No containers</div></div>`;
+    return;
+  }
+
+  const rows = containers.map(c => {
+    const name = sanitizeName(c.Names && c.Names[0]);
+    const sc = statusClass(c.Status);
+    const ports = (c.Ports || [])
+      .filter(p => p.PublicPort)
+      .map(p => `${p.PublicPort}→${p.PrivatePort}`)
+      .join(', ');
+    const image = (c.Image || '').split(':')[0].split('/').pop();
+    const statsHtml = sc === 'running'
+      ? `<td><div class="mini-bar-container"><div class="mini-bar"><div class="mini-bar-fill" id="bar-cpu-${c.Id.slice(0,12)}" style="width:0%"></div></div><span class="mini-bar-value" id="val-cpu-${c.Id.slice(0,12)}">…</span></div></td>
+         <td><div class="mini-bar-container"><div class="mini-bar"><div class="mini-bar-fill" id="bar-mem-${c.Id.slice(0,12)}" style="width:0%"></div></div><span class="mini-bar-value" id="val-mem-${c.Id.slice(0,12)}">…</span></div></td>`
+      : `<td><span class="text-muted">—</span></td><td><span class="text-muted">—</span></td>`;
+
+    return `<tr data-id="${c.Id}" data-name="${name}">
+      <td><div class="container-name">${name}</div><div class="container-image">${image}</div></td>
+      <td><span class="status-badge ${sc}">${c.State || sc}</span></td>
+      <td class="text-muted font-mono" style="font-size:11px">${fmtTime(c.Created)}</td>
+      <td class="container-ports font-mono">${ports || '—'}</td>
+      ${statsHtml}
+      <td>
+        <div class="action-group">
+          ${sc === 'running'
+            ? `${(c.Ports || []).some(p => p.PublicPort)
+                 ? `<button class="btn btn-icon" data-action="web" data-id="${c.Id}" data-wport="${(c.Ports || []).filter(p => p.PublicPort).sort((a, b) => a.PublicPort - b.PublicPort)[0].PublicPort}" title="Open Web UI">🌐</button>` : ''}
+               <button class="btn btn-warn btn-icon" data-action="stop" data-id="${c.Id}" title="Stop">■</button>
+               <button class="btn btn-icon" data-action="restart" data-id="${c.Id}" title="Restart">↻</button>
+               <button class="btn btn-icon font-mono" data-action="console" data-id="${c.Id}" title="Console" style="font-size:10px">&gt;_</button>`
+            : `<button class="btn btn-success btn-icon" data-action="start" data-id="${c.Id}" title="Start">▶</button>`}
+          <button class="btn btn-icon" data-action="logs" data-id="${c.Id}" title="Logs">≡</button>
+        </div>
+      </td>
+    </tr>`;
+  }).join('');
+
+  el.innerHTML = `<table class="container-table">
+    <thead><tr>
+      <th>Name / Image</th>
+      <th>Status</th>
+      <th>Created</th>
+      <th>Ports</th>
+      <th>CPU</th>
+      <th>Memory</th>
+      <th>Actions</th>
+    </tr></thead>
+    <tbody>${rows}</tbody>
+  </table>`;
+
+  // Wire up action buttons
+  el.querySelectorAll('[data-action]').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const action = btn.dataset.action;
+      const id = btn.dataset.id;
+      if (action === 'logs') { openLogs(id, btn.closest('tr').dataset.name); return; }
+      if (action === 'console') { openTerminalFor(id); return; }
+      if (action === 'web') { api.openUrl(`http://${state.config.host}:${btn.dataset.wport}`); return; }
+      btn.disabled = true;
+      const r = await api.docker.action({ ...state.config, id, action });
+      if (r.ok) {
+        toast(`Container ${action}ed`, 'success');
+        setTimeout(() => loadDashboard(), 1500);
+      } else {
+        toast(r.error || 'Action failed', 'error');
+        btn.disabled = false;
+      }
+    });
+  });
+
+  // Row click → detail
+  el.querySelectorAll('tbody tr').forEach(row => {
+    row.addEventListener('click', () => openDetail(row.dataset.id));
+  });
+
+  // Load stats for running containers
+  containers.filter(c => c.State === 'running').forEach(c => {
+    loadMiniStats(c.Id);
+  });
+}
+
+async function loadMiniStats(id) {
+  const short = id.slice(0, 12);
+  const r = await api.docker.stats({ ...state.config, id });
+  if (!r.ok || !r.data) return;
+  const s = r.data;
+
+  // CPU %
+  const cpuDelta = s.cpu_stats.cpu_usage.total_usage - (s.precpu_stats.cpu_usage.total_usage || 0);
+  const sysDelta = s.cpu_stats.system_cpu_usage - (s.precpu_stats.system_cpu_usage || 0);
+  const cpus = s.cpu_stats.online_cpus || (s.cpu_stats.cpu_usage.percpu_usage || []).length || 1;
+  const cpu = sysDelta > 0 ? (cpuDelta / sysDelta) * cpus * 100 : 0;
+
+  // Mem %
+  const memUsed = s.memory_stats.usage - (s.memory_stats.stats?.cache || 0);
+  const memLimit = s.memory_stats.limit;
+  const memPct = memLimit > 0 ? (memUsed / memLimit) * 100 : 0;
+
+  const cpuEl = $(`val-cpu-${short}`);
+  const memEl = $(`val-mem-${short}`);
+  const cpuBar = $(`bar-cpu-${short}`);
+  const memBar = $(`bar-mem-${short}`);
+
+  if (cpuEl) cpuEl.textContent = cpu.toFixed(1) + '%';
+  if (memEl) memEl.textContent = memPct.toFixed(1) + '%';
+  if (cpuBar) {
+    cpuBar.style.width = Math.min(cpu, 100) + '%';
+    cpuBar.className = 'mini-bar-fill' + (cpu > 80 ? ' critical' : cpu > 60 ? ' high' : '');
+  }
+  if (memBar) {
+    memBar.style.width = Math.min(memPct, 100) + '%';
+    memBar.className = 'mini-bar-fill' + (memPct > 85 ? ' critical' : memPct > 70 ? ' high' : '');
+  }
+}
+
+// ─── Container List page ──────────────────────────────────────────────────────
+function renderContainersList() {
+  renderContainerTable('containers-list', state.containers);
+}
+
+// ─── Detail Panel ─────────────────────────────────────────────────────────────
+async function openDetail(id) {
+  const c = state.containers.find(x => x.Id === id);
+  if (!c) return;
+  state.selectedContainer = c;
+
+  const name = sanitizeName(c.Names && c.Names[0]);
+  const sc = statusClass(c.Status);
+  $('detail-title').textContent = name;
+  $('detail-status-badge').className = `status-badge ${sc}`;
+  $('detail-status-badge').textContent = c.State || sc;
+
+  // Actions
+  const acts = $('detail-actions');
+  if (sc === 'running') {
+    acts.innerHTML = `
+      <button class="btn btn-warn" data-action="stop" data-id="${id}">■ Stop</button>
+      <button class="btn btn-icon" data-action="restart" data-id="${id}">↻ Restart</button>`;
+  } else {
+    acts.innerHTML = `<button class="btn btn-success" data-action="start" data-id="${id}">▶ Start</button>`;
+  }
+  acts.innerHTML += `<button class="btn btn-danger" data-action="remove" data-id="${id}">✕ Remove</button>`;
+
+  acts.querySelectorAll('[data-action]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const action = btn.dataset.action;
+      if (action === 'remove' && !confirm(`Remove container "${name}"?`)) return;
+      btn.disabled = true;
+      const r = await api.docker.action({ ...state.config, id, action });
+      if (r.ok) {
+        toast(`Container ${action}ed`, 'success');
+        if (action === 'remove') closeDetail();
+        setTimeout(loadDashboard, 1500);
+      } else {
+        toast(r.error || 'Failed', 'error');
+        btn.disabled = false;
+      }
+    });
+  });
+
+  // Info section
+  const ports = (c.Ports || []).filter(p => p.PublicPort).map(p => `${p.IP || '0.0.0.0'}:${p.PublicPort} → ${p.PrivatePort}/${p.Type || 'tcp'}`);
+  $('detail-info').innerHTML = `
+    <div class="detail-section-title">Info</div>
+    <div class="detail-row"><span class="detail-label">Image</span><span class="detail-value font-mono">${c.Image}</span></div>
+    <div class="detail-row"><span class="detail-label">ID</span><span class="detail-value font-mono" style="font-size:10px">${id.slice(0,24)}</span></div>
+    <div class="detail-row"><span class="detail-label">Created</span><span class="detail-value">${fmtTime(c.Created)}</span></div>
+    <div class="detail-row"><span class="detail-label">Status</span><span class="detail-value">${c.Status}</span></div>
+    <div class="detail-row"><span class="detail-label">Compose</span><span class="detail-value">${(c.Labels && c.Labels['com.docker.compose.project']) || '—'}</span></div>
+  `;
+
+  if (ports.length) {
+    $('detail-ports-section').style.display = '';
+    const pubPorts = (c.Ports || []).filter(p => p.PublicPort);
+    $('detail-ports').innerHTML = ports.map((p, i) => {
+      const pub = pubPorts[i];
+      return `<div class="detail-row"><span class="detail-value font-mono crumb" style="font-size:11px" data-wport="${pub ? pub.PublicPort : ''}" title="Open in browser">${p} ↗</span></div>`;
+    }).join('');
+    $('detail-ports').querySelectorAll('[data-wport]').forEach(el =>
+      el.addEventListener('click', () => { if (el.dataset.wport) api.openUrl(`http://${state.config.host}:${el.dataset.wport}`); }));
+  } else {
+    $('detail-ports-section').style.display = 'none';
+  }
+
+  // Logs button
+  $('detail-logs-btn').onclick = () => openLogs(id, name);
+
+  $('detail-panel').classList.add('open');
+
+  // Stats
+  if (sc === 'running') loadDetailStats(id);
+}
+
+async function loadDetailStats(id) {
+  const r = await api.docker.stats({ ...state.config, id });
+  if (!r.ok || !r.data) return;
+  const s = r.data;
+
+  const cpuDelta = s.cpu_stats.cpu_usage.total_usage - (s.precpu_stats.cpu_usage.total_usage || 0);
+  const sysDelta = s.cpu_stats.system_cpu_usage - (s.precpu_stats.system_cpu_usage || 0);
+  const cpus = s.cpu_stats.online_cpus || 1;
+  const cpu = sysDelta > 0 ? (cpuDelta / sysDelta) * cpus * 100 : 0;
+
+  const memUsed = s.memory_stats.usage - (s.memory_stats.stats?.cache || 0);
+  const memLimit = s.memory_stats.limit;
+  const memPct = memLimit > 0 ? (memUsed / memLimit) * 100 : 0;
+
+  $('detail-cpu-val').textContent = cpu.toFixed(2) + '%';
+  $('detail-cpu-bar').style.width = Math.min(cpu, 100) + '%';
+  $('detail-cpu-bar').className = 'stat-gauge-fill' + (cpu > 80 ? ' warn' : '');
+
+  $('detail-mem-val').textContent = memPct.toFixed(1) + '%';
+  $('detail-mem-bar').style.width = Math.min(memPct, 100) + '%';
+  $('detail-mem-bar').className = 'stat-gauge-fill' + (memPct > 85 ? ' warn' : '');
+
+  $('detail-mem-used').textContent = `${fmt(memUsed)} / ${fmt(memLimit)}`;
+  $('detail-mem-abs').style.width = Math.min(memPct, 100) + '%';
+
+  // Network
+  const nets = s.networks || {};
+  const netRx = Object.values(nets).reduce((a, n) => a + (n.rx_bytes || 0), 0);
+  const netTx = Object.values(nets).reduce((a, n) => a + (n.tx_bytes || 0), 0);
+  $('detail-net').textContent = `↓${fmt(netRx)} / ↑${fmt(netTx)}`;
+
+  const blkRead = (s.blkio_stats?.io_service_bytes_recursive || []).filter(x => x.op === 'Read').reduce((a, x) => a + x.value, 0);
+  const blkWrite = (s.blkio_stats?.io_service_bytes_recursive || []).filter(x => x.op === 'Write').reduce((a, x) => a + x.value, 0);
+  $('detail-block').textContent = `R:${fmt(blkRead)} W:${fmt(blkWrite)}`;
+
+  $('detail-pids').textContent = s.pids_stats?.current || '—';
+}
+
+function closeDetail() {
+  $('detail-panel').classList.remove('open');
+  state.selectedContainer = null;
+}
+$('detail-close-btn').addEventListener('click', closeDetail);
+
+// ─── Logs (live stream with ANSI colors, pause, search) ───────────────────────
+let logTerm = null, logFit = null, logSearchAddon = null;
+let logSessionId = null, logPaused = false, logBuffer = [];
+
+function initLogTerm() {
+  if (logTerm) return;
+  const XTerm = window.Terminal.Terminal || window.Terminal;
+  const Fit = window.FitAddon.FitAddon || window.FitAddon;
+  const Search = window.SearchAddon.SearchAddon || window.SearchAddon;
+  logTerm = new XTerm({
+    convertEol: true, disableStdin: true,
+    fontSize: 11.5, lineHeight: 1.25,
+    fontFamily: "'SF Mono', Menlo, Monaco, monospace",
+    scrollback: 10000, cursorStyle: 'bar',
+    theme: { background: '#0d1117', foreground: '#c9d1d9', cursor: '#0d1117',
+      selectionBackground: 'rgba(88,166,255,0.3)' }
+  });
+  logFit = new Fit();
+  logSearchAddon = new Search();
+  logTerm.loadAddon(logFit);
+  logTerm.loadAddon(logSearchAddon);
+  logTerm.open($('log-output-term'));
+  logFit.fit();
+
+  api.logs.onData(({ sessionId, text }) => {
+    if (sessionId !== logSessionId || !logTerm) return;
+    if (logPaused) logBuffer.push(text);
+    else logTerm.write(text);
+  });
+  api.logs.onEnd(({ sessionId }) => {
+    if (sessionId === logSessionId && logTerm) {
+      logTerm.write('\r\n\x1b[33m── log stream ended ──\x1b[0m\r\n');
+      logSessionId = null;
+      $('log-live-dot').classList.add('paused');
+    }
+  });
+}
+
+async function openLogs(id, name) {
+  initLogTerm();
+  $('log-title').textContent = name;
+  $('log-panel').classList.add('open');
+  await stopLogStream();
+  logTerm.clear();
+  logPaused = false;
+  logBuffer = [];
+  updateLogPauseUI();
+  setTimeout(() => logFit.fit(), 120);
+  const r = await api.logs.start({ ...state.config, id });
+  if (r.ok) {
+    logSessionId = r.sessionId;
+    $('log-live-dot').classList.remove('paused');
+  } else {
+    logTerm.writeln('\x1b[31mError: ' + r.error + '\x1b[0m');
+    $('log-live-dot').classList.add('paused');
+  }
+}
+
+async function stopLogStream() {
+  if (logSessionId) {
+    await api.logs.stop({ sessionId: logSessionId });
+    logSessionId = null;
+  }
+}
+
+function updateLogPauseUI() {
+  $('log-pause-btn').textContent = logPaused ? '▶' : '⏸';
+  $('log-pause-btn').title = logPaused ? 'Resume stream' : 'Pause stream';
+  $('log-live-dot').classList.toggle('paused', logPaused || !logSessionId);
+}
+
+$('log-pause-btn').addEventListener('click', () => {
+  logPaused = !logPaused;
+  if (!logPaused && logBuffer.length) {
+    logTerm.write(logBuffer.join(''));
+    logBuffer = [];
+  }
+  updateLogPauseUI();
+});
+
+$('log-search').addEventListener('keydown', (e) => {
+  if (e.key !== 'Enter') return;
+  const q = e.target.value;
+  if (!q || !logSearchAddon) return;
+  const opts = { caseSensitive: false, decorations: { matchOverviewRuler: '#d29922', activeMatchColorOverviewRuler: '#f85149' } };
+  if (e.shiftKey) logSearchAddon.findPrevious(q, opts);
+  else logSearchAddon.findNext(q, opts);
+});
+
+$('log-close-btn').addEventListener('click', () => {
+  $('log-panel').classList.remove('open');
+  stopLogStream();
+});
+
+// ─── Images ───────────────────────────────────────────────────────────────────
+async function loadImages() {
+  if (!state.images.length) {
+    const r = await api.docker.images(state.config);
+    if (r.ok) state.images = r.data || [];
+  }
+  const el = $('images-list');
+  if (!state.images.length) {
+    el.innerHTML = `<div class="empty-state"><div class="empty-icon">◱</div><div class="empty-title">No images</div></div>`;
+    return;
+  }
+  el.innerHTML = `<div class="resource-grid">${state.images.map(img => {
+    const tags = (img.RepoTags || []).filter(t => t !== '<none>:<none>');
+    const name = tags[0] ? tags[0].split(':')[0].split('/').pop() : img.Id.slice(7, 19);
+    const tag = tags[0] ? tags[0].split(':')[1] : 'none';
+    return `<div class="resource-card">
+      <div class="resource-card-name">${name}</div>
+      <div class="resource-card-meta">Tag: <span style="color:var(--cyan)">${tag}</span></div>
+      <div class="resource-card-meta">Size: ${fmt(img.Size)}</div>
+      <div class="resource-card-meta">Created: ${fmtTime(img.Created)}</div>
+      ${tags.length > 1 ? `<div style="margin-top:6px">${tags.slice(1).map(t => `<span class="resource-tag">${t}</span>`).join('')}</div>` : ''}
+    </div>`;
+  }).join('')}</div>`;
+}
+
+// ─── Volumes ──────────────────────────────────────────────────────────────────
+async function loadVolumes() {
+  if (!state.volumes.length) {
+    const r = await api.docker.volumes(state.config);
+    if (r.ok) state.volumes = (r.data && r.data.Volumes) || [];
+  }
+  const el = $('volumes-list');
+  if (!state.volumes.length) {
+    el.innerHTML = `<div class="empty-state"><div class="empty-icon">⬡</div><div class="empty-title">No volumes</div></div>`;
+    return;
+  }
+  el.innerHTML = `<div class="resource-grid">${state.volumes.map(v => `
+    <div class="resource-card">
+      <div class="resource-card-name">${v.Name}</div>
+      <div class="resource-card-meta">Driver: ${v.Driver}</div>
+      <div class="resource-card-meta" style="word-break:break-all;font-size:10px;color:var(--text-muted)">${v.Mountpoint}</div>
+    </div>`).join('')}</div>`;
+}
+
+// ─── Networks ─────────────────────────────────────────────────────────────────
+async function loadNetworks() {
+  if (!state.networks.length) {
+    const r = await api.docker.networks(state.config);
+    if (r.ok) state.networks = r.data || [];
+  }
+  const el = $('networks-list');
+  if (!state.networks.length) {
+    el.innerHTML = `<div class="empty-state"><div class="empty-icon">⬡</div><div class="empty-title">No networks</div></div>`;
+    return;
+  }
+  el.innerHTML = `<div class="resource-grid">${state.networks.map(n => {
+    const subnet = Object.values(n.IPAM?.Config || {})[0]?.Subnet || '—';
+    return `<div class="resource-card">
+      <div class="resource-card-name">${n.Name}</div>
+      <div class="resource-card-meta">Driver: ${n.Driver}</div>
+      <div class="resource-card-meta">Subnet: ${subnet}</div>
+      <div class="resource-card-meta">Scope: ${n.Scope}</div>
+      ${n.Internal ? '<span class="resource-tag">internal</span>' : ''}
+      ${n.Attachable ? '<span class="resource-tag">attachable</span>' : ''}
+    </div>`;
+  }).join('')}</div>`;
+}
+
+// ─── Terminal (container console via docker exec) ────────────────────────────
+let term = null, fitAddon = null, termSessionId = null;
+
+function initTerm() {
+  if (term) return;
+  const XTerm = window.Terminal.Terminal || window.Terminal;
+  const Fit = window.FitAddon.FitAddon || window.FitAddon;
+  term = new XTerm({
+    fontSize: 12.5,
+    fontFamily: "'SF Mono', Menlo, Monaco, 'Courier New', monospace",
+    cursorBlink: true,
+    scrollback: 5000,
+    theme: {
+      background: '#0d1117', foreground: '#e6edf3',
+      cursor: '#58a6ff', selectionBackground: 'rgba(88,166,255,0.3)',
+      black: '#484f58', red: '#ff7b72', green: '#3fb950', yellow: '#d29922',
+      blue: '#58a6ff', magenta: '#bc8cff', cyan: '#39c5cf', white: '#b1bac4',
+      brightBlack: '#6e7681', brightRed: '#ffa198', brightGreen: '#56d364',
+      brightYellow: '#e3b341', brightBlue: '#79c0ff', brightMagenta: '#d2a8ff',
+      brightCyan: '#56d4dd', brightWhite: '#f0f6fc'
+    }
+  });
+  fitAddon = new Fit();
+  term.loadAddon(fitAddon);
+  term.open($('terminal-wrap'));
+  fitAddon.fit();
+
+  term.onData(d => { if (termSessionId) api.term.write({ sessionId: termSessionId, data: d }); });
+  term.onResize(({ cols, rows }) => { if (termSessionId) api.term.resize({ sessionId: termSessionId, cols, rows }); });
+  window.addEventListener('resize', () => { if (term && $('page-terminal').classList.contains('active')) fitAddon.fit(); });
+
+  api.term.onData(({ sessionId, data }) => {
+    if (sessionId === termSessionId && term) term.write(new Uint8Array(data));
+  });
+  api.term.onExit(({ sessionId }) => {
+    if (sessionId === termSessionId && term) {
+      term.writeln('\r\n\x1b[31m[session closed]\x1b[0m');
+      termSessionId = null;
+      setTermStatus(false);
+    }
+  });
+}
+
+function setTermStatus(connected, label) {
+  $('term-dot').className = 'status-dot' + (connected ? ' connected' : '');
+  $('term-status-label').textContent = label || (connected ? 'Connected' : 'Not connected');
+  $('term-connect-btn').style.display = connected ? 'none' : '';
+  $('term-disconnect-btn').style.display = connected ? '' : 'none';
+}
+
+function setupTerminalPage() {
+  const sel = $('term-container-select');
+  const current = sel.value;
+  const running = state.containers.filter(c => (c.State || '').toLowerCase() === 'running');
+  sel.innerHTML = running.length
+    ? running.map(c => `<option value="${c.Id}">${sanitizeName(c.Names && c.Names[0])}</option>`).join('')
+    : '<option value="">No running containers</option>';
+  if (current && running.some(c => c.Id === current)) sel.value = current;
+  initTerm();
+  setTimeout(() => { if (fitAddon) fitAddon.fit(); if (term) term.focus(); }, 50);
+}
+
+async function connectTerm() {
+  const id = $('term-container-select').value;
+  if (!id) { toast('No running container selected', 'error'); return; }
+  await disconnectTerm(true);
+  initTerm();
+  term.clear();
+  setTermStatus(false, 'Connecting…');
+  fitAddon.fit();
+  const r = await api.term.start({ ...state.config, id, cols: term.cols, rows: term.rows });
+  if (!r.ok) {
+    setTermStatus(false);
+    toast('Console failed: ' + r.error, 'error');
+    term.writeln('\x1b[31mFailed to open console: ' + r.error + '\x1b[0m');
+    return;
+  }
+  termSessionId = r.sessionId;
+  const name = $('term-container-select').selectedOptions[0]?.textContent || '';
+  setTermStatus(true, name);
+  term.focus();
+}
+
+async function disconnectTerm(silent) {
+  if (termSessionId) {
+    await api.term.kill({ sessionId: termSessionId });
+    termSessionId = null;
+  }
+  if (!silent) setTermStatus(false);
+}
+
+function openTerminalFor(id) {
+  showPage('terminal');
+  setupTerminalPage();
+  const sel = $('term-container-select');
+  if ([...sel.options].some(o => o.value === id)) sel.value = id;
+  connectTerm();
+}
+
+$('term-connect-btn').addEventListener('click', connectTerm);
+$('term-disconnect-btn').addEventListener('click', () => disconnectTerm());
+$('term-container-select').addEventListener('change', () => { if (termSessionId) connectTerm(); });
+
+// ─── Files (container file browser) ───────────────────────────────────────────
+let filesPath = '/';
+
+function filesContainerId() { return $('files-container-select').value; }
+
+function setupFilesPage() {
+  const sel = $('files-container-select');
+  const current = sel.value;
+  const running = state.containers.filter(c => (c.State || '').toLowerCase() === 'running');
+  sel.innerHTML = running.length
+    ? running.map(c => `<option value="${c.Id}">${sanitizeName(c.Names && c.Names[0])}</option>`).join('')
+    : '<option value="">No running containers</option>';
+  const kept = current && running.some(c => c.Id === current);
+  if (kept) sel.value = current;
+  if (sel.value) refreshMounts(!kept || !filesMounts.length);
+}
+
+// Mapped volumes → quick-jump chips (default view)
+let filesMounts = [];
+
+async function refreshMounts(navigate) {
+  const id = filesContainerId();
+  if (!id) return;
+  filesMounts = [];
+  const r = await api.docker.inspect({ ...state.config, id });
+  if (r.ok && r.data && r.data.Mounts) {
+    filesMounts = r.data.Mounts
+      .filter(m => m.Destination)
+      .map(m => ({ dest: m.Destination, src: m.Source || m.Name || '' }))
+      .sort((a, b) => a.dest.localeCompare(b.dest));
+  }
+  renderMountChips();
+  if (navigate) loadFiles(filesMounts.length ? filesMounts[0].dest + '/' : '/');
+  else renderMountChips();
+}
+
+function renderMountChips() {
+  const el = $('files-mounts');
+  if (!filesMounts.length) { el.innerHTML = ''; return; }
+  el.innerHTML = filesMounts.map(m =>
+    `<span class="mount-chip" data-dest="${m.dest}/" title="mapped from ${m.src}">⛁ ${m.dest}</span>`).join('') +
+    `<span class="mount-chip" data-dest="/" title="Browse the container's entire filesystem">/ full fs</span>`;
+  el.querySelectorAll('.mount-chip').forEach(c =>
+    c.addEventListener('click', () => loadFiles(c.dataset.dest)));
+  highlightMountChip();
+}
+
+function highlightMountChip() {
+  let best = null;
+  document.querySelectorAll('#files-mounts .mount-chip').forEach(c => {
+    c.classList.remove('active');
+    const d = c.dataset.dest;
+    if (filesPath.startsWith(d) && (!best || d.length > best.dataset.dest.length)) best = c;
+  });
+  if (best) best.classList.add('active');
+}
+
+function renderCrumbs() {
+  const segs = filesPath.split('/').filter(Boolean);
+  let html = `<span class="crumb" data-path="/">/</span>`;
+  let acc = '';
+  for (const s of segs) {
+    acc += '/' + s;
+    html += `<span class="crumb-sep">›</span><span class="crumb" data-path="${acc}/">${s}</span>`;
+  }
+  $('files-crumbs').innerHTML = html;
+  document.querySelectorAll('#files-crumbs .crumb').forEach(c =>
+    c.addEventListener('click', () => loadFiles(c.dataset.path)));
+}
+
+async function loadFiles(p) {
+  const id = filesContainerId();
+  if (!id) return;
+  filesPath = p.endsWith('/') ? p : p + '/';
+  renderCrumbs();
+  highlightMountChip();
+  $('files-list').innerHTML = '<div class="empty-state"><div class="spinner"></div></div>';
+  const r = await api.files.list({ ...state.config, id, dirPath: filesPath });
+  if (!r.ok) {
+    $('files-list').innerHTML = `<div class="empty-state"><div class="empty-icon">⚠</div><div class="empty-title">Can't open folder</div><div class="empty-sub">${r.error}</div></div>`;
+    return;
+  }
+  const entries = r.entries.sort((a, b) => (a.type === 'dir' ? 0 : 1) - (b.type === 'dir' ? 0 : 1) || a.name.localeCompare(b.name));
+  const up = filesPath !== '/' ? `<tr class="file-row"><td colspan="4"><div class="file-name dir" data-nav="${filesPath.replace(/[^/]+\/$/, '')}"><span class="file-icon">↩</span>..</div></td></tr>` : '';
+  const rows = entries.map(en => {
+    const icon = en.type === 'dir' ? '📁' : en.type === 'link' ? '🔗' : '📄';
+    const nameHtml = en.type === 'dir'
+      ? `<div class="file-name dir" data-nav="${filesPath + en.name}/"><span class="file-icon">${icon}</span>${en.name}</div>`
+      : `<div class="file-name"><span class="file-icon">${icon}</span>${en.name}${en.link ? `<span class="text-muted" style="font-size:10px"> → ${en.link}</span>` : ''}</div>`;
+    const acts = en.type === 'file'
+      ? `<div class="file-acts">
+           ${en.size <= 1024 * 1024 ? `<button class="btn btn-icon" data-edit="${en.name}" title="View / Edit">✏️</button>` : ''}
+           <button class="btn btn-icon" data-dl="${en.name}" title="Download">⤓</button>
+         </div>`
+      : '';
+    return `<tr class="file-row">
+      <td>${nameHtml}</td>
+      <td class="text-muted font-mono" style="font-size:11px">${en.type === 'file' ? fmt(en.size) : '—'}</td>
+      <td class="text-muted font-mono" style="font-size:11px">${en.date}</td>
+      <td style="width:90px">${acts}</td>
+    </tr>`;
+  }).join('');
+  $('files-list').innerHTML = `<table class="container-table">
+    <thead><tr><th>Name</th><th style="width:90px">Size</th><th style="width:130px">Modified</th><th></th></tr></thead>
+    <tbody>${up}${rows || ''}</tbody></table>`;
+
+  document.querySelectorAll('#files-list [data-nav]').forEach(el =>
+    el.addEventListener('click', () => loadFiles(el.dataset.nav)));
+  document.querySelectorAll('#files-list [data-dl]').forEach(b =>
+    b.addEventListener('click', async () => {
+      b.disabled = true;
+      const r2 = await api.files.download({ ...state.config, id: filesContainerId(), filePath: filesPath + b.dataset.dl });
+      b.disabled = false;
+      if (r2.ok) toast(`Saved to ${r2.savedTo}`, 'success');
+      else if (!r2.canceled) toast(r2.error, 'error');
+    }));
+  document.querySelectorAll('#files-list [data-edit]').forEach(b =>
+    b.addEventListener('click', () => openEditor(b.dataset.edit)));
+}
+
+// File editor modal
+let editorFile = null;
+async function openEditor(name) {
+  const id = filesContainerId();
+  const r = await api.files.read({ ...state.config, id, filePath: filesPath + name });
+  if (!r.ok) { toast(r.error, 'error'); return; }
+  editorFile = name;
+  $('editor-title').textContent = filesPath + name;
+  $('editor-textarea').value = r.content;
+  $('editor-modal').classList.add('open');
+  $('editor-textarea').focus();
+}
+function closeEditor() { $('editor-modal').classList.remove('open'); editorFile = null; }
+$('editor-close-btn').addEventListener('click', closeEditor);
+$('editor-cancel-btn').addEventListener('click', closeEditor);
+$('editor-save-btn').addEventListener('click', async () => {
+  if (!editorFile) return;
+  const btn = $('editor-save-btn');
+  btn.disabled = true; btn.textContent = 'Saving…';
+  const r = await api.files.write({ ...state.config, id: filesContainerId(), destDir: filesPath, name: editorFile, content: $('editor-textarea').value });
+  btn.disabled = false; btn.textContent = 'Save to container';
+  if (r.ok) { toast(`${editorFile} saved — restart the container to apply config changes`, 'success', 5000); closeEditor(); }
+  else toast(r.error, 'error');
+});
+
+$('files-container-select').addEventListener('change', () => refreshMounts(true));
+$('files-refresh-btn').addEventListener('click', () => loadFiles(filesPath));
+$('files-upload-btn').addEventListener('click', async () => {
+  const id = filesContainerId();
+  if (!id) return;
+  const r = await api.files.upload({ ...state.config, id, destDir: filesPath });
+  if (r.ok) { toast(`Uploaded ${r.name} to ${filesPath}`, 'success'); loadFiles(filesPath); }
+  else if (!r.canceled) toast(r.error, 'error');
+});
+
+// ─── Deploy wizard ────────────────────────────────────────────────────────────
+function kvRow(kind) {
+  const ph = {
+    ports: ['host port e.g. 8080', 'container port e.g. 80'],
+    vols: ['host path e.g. /share/Container/app', 'container path e.g. /config'],
+    envs: ['KEY=value e.g. TZ=America/New_York', null]
+  }[kind];
+  const div = document.createElement('div');
+  div.className = 'kv-row';
+  div.innerHTML = ph[1]
+    ? `<input class="form-input small" data-k placeholder="${ph[0]}" spellcheck="false"><span class="crumb-sep">→</span><input class="form-input" data-v placeholder="${ph[1]}" spellcheck="false"><button class="kv-remove">✕</button>`
+    : `<input class="form-input" data-k placeholder="${ph[0]}" spellcheck="false"><button class="kv-remove">✕</button>`;
+  div.querySelector('.kv-remove').addEventListener('click', () => div.remove());
+  return div;
+}
+
+function openDeploy() {
+  ['dep-ports', 'dep-vols', 'dep-envs'].forEach(id => { $(id).innerHTML = ''; });
+  $('dep-ports').appendChild(kvRow('ports'));
+  $('dep-vols').appendChild(kvRow('vols'));
+  $('dep-envs').appendChild(kvRow('envs'));
+  $('dep-image').value = ''; $('dep-name').value = '';
+  $('dep-restart').value = 'unless-stopped';
+  const net = $('dep-network');
+  net.innerHTML = '<option value="">default (bridge)</option>' +
+    state.networks.filter(n => !['bridge', 'host', 'none'].includes(n.Name)).map(n => `<option value="${n.Name}">${n.Name}</option>`).join('');
+  $('deploy-status').textContent = '';
+  $('deploy-modal').classList.add('open');
+  $('dep-image').focus();
+}
+function closeDeploy() { $('deploy-modal').classList.remove('open'); }
+
+document.querySelectorAll('.kv-add').forEach(a =>
+  a.addEventListener('click', () => $('dep-' + a.dataset.add).appendChild(kvRow(a.dataset.add))));
+$('deploy-btn').addEventListener('click', openDeploy);
+$('deploy-close-btn').addEventListener('click', closeDeploy);
+$('deploy-cancel-btn').addEventListener('click', closeDeploy);
+
+$('deploy-go-btn').addEventListener('click', async () => {
+  const image = $('dep-image').value.trim();
+  if (!image) { toast('Enter an image name', 'error'); return; }
+  const rows = (id) => [...document.querySelectorAll(`#${id} .kv-row`)];
+  const spec = {
+    image,
+    name: $('dep-name').value.trim(),
+    ports: rows('dep-ports').map(r => ({ host: r.querySelector('[data-k]').value.trim(), cont: r.querySelector('[data-v]')?.value.trim() })).filter(p => p.cont),
+    volumes: rows('dep-vols').map(r => ({ host: r.querySelector('[data-k]').value.trim(), cont: r.querySelector('[data-v]')?.value.trim() })).filter(v => v.host && v.cont),
+    env: rows('dep-envs').map(r => r.querySelector('[data-k]').value.trim()).filter(Boolean),
+    restart: $('dep-restart').value,
+    network: $('dep-network').value
+  };
+  const btn = $('deploy-go-btn');
+  btn.disabled = true; btn.textContent = 'Deploying…';
+  $('deploy-status').textContent = `Pulling ${image} — can take a few minutes…`;
+  const r = await api.deploy.create({ ...state.config, spec });
+  btn.disabled = false; btn.textContent = 'Deploy';
+  if (r.ok) {
+    toast(`${spec.name || image} deployed and running ✓`, 'success', 5000);
+    closeDeploy();
+    await loadDashboard();
+    showPage('containers');
+    renderContainersList();
+  } else {
+    $('deploy-status').textContent = '';
+    toast('Deploy failed: ' + r.error, 'error', 8000);
+  }
+});
+
+// ─── Settings ─────────────────────────────────────────────────────────────────
+function fmtCertDate(d) {
+  const t = new Date(d);
+  return isNaN(t) ? d : t.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+}
+
+async function refreshCertStatus() {
+  const h = activeHost();
+  const info = await api.certs.info({ hostId: h ? h.id : null });
+  const srcLabel = { host: `imported for ${h ? h.name : 'host'}`, custom: 'imported', bundled: 'bundled' }[info.source];
+  const srcPill = `<span class="cert-pill ${info.source !== 'bundled' ? 'custom' : ''}">${srcLabel}</span>`;
+  const row = (label, c) => {
+    if (!c || c.error) return `<div class="cert-row"><span style="color:var(--danger)">✕</span> ${label} — ${c?.error || 'missing'}</div>`;
+    return `<div class="cert-row"><span style="color:${c.expired ? 'var(--danger)' : 'var(--running)'}">${c.expired ? '✕' : '✓'}</span>
+      ${label} <span class="text-muted">(${c.cn || '—'})</span>
+      <span class="cert-pill ${c.expired ? 'expired' : ''}">${c.expired ? 'EXPIRED ' : 'expires '}${fmtCertDate(c.validTo)}</span></div>`;
+  };
+  $('cert-status').innerHTML = `
+    <div style="margin-bottom:8px">${srcPill}</div>
+    ${row('ca.pem', info.ca)}
+    ${row('cert.pem', info.cert)}
+    <div class="cert-row"><span style="color:${info.key ? 'var(--running)' : 'var(--danger)'}">${info.key ? '✓' : '✕'}</span> key.pem — Private key</div>`;
+  $('cert-reset-btn').style.display = info.source !== 'bundled' ? '' : 'none';
+}
+
+let editingHostId = null;
+
+function renderHostsList() {
+  const hosts = state.config.hosts || [];
+  $('hosts-list').innerHTML = hosts.map(h => {
+    if (h.id === editingHostId) {
+      return `<div class="host-row active">
+        <input class="form-input" data-e-name value="${h.name}" placeholder="Name" style="flex:0 0 130px" spellcheck="false">
+        <input class="form-input" data-e-ip value="${h.host}" placeholder="IP address" style="flex:1" spellcheck="false">
+        <input class="form-input" data-e-port type="number" value="${h.port}" style="flex:0 0 80px">
+        <button class="btn btn-primary" data-save="${h.id}">Save</button>
+        <button class="btn" data-cancel>Cancel</button>
+      </div>`;
+    }
+    return `<div class="host-row${h.id === state.config.activeHostId ? ' active' : ''}">
+      <input type="radio" name="active-host" ${h.id === state.config.activeHostId ? 'checked' : ''} data-activate="${h.id}" title="Make active">
+      <span class="host-row-name">${h.name}</span>
+      <span class="host-row-addr">${h.host}:${h.port}</span>
+      <button class="btn btn-icon" data-edit="${h.id}" title="Edit">✎</button>
+      <button class="btn" data-test="${h.id}">Test</button>
+      <button class="btn" data-certs="${h.id}">Certs…</button>
+      <button class="btn btn-icon" data-remove="${h.id}" title="Remove" ${hosts.length < 2 ? 'disabled' : ''}>✕</button>
+    </div>`;
+  }).join('') || '<div class="form-hint">No hosts yet — add your NAS below.</div>';
+
+  $('hosts-list').querySelectorAll('[data-edit]').forEach(b =>
+    b.addEventListener('click', () => { editingHostId = b.dataset.edit; renderHostsList(); }));
+  $('hosts-list').querySelectorAll('[data-cancel]').forEach(b =>
+    b.addEventListener('click', () => { editingHostId = null; renderHostsList(); }));
+  $('hosts-list').querySelectorAll('[data-save]').forEach(b =>
+    b.addEventListener('click', async () => {
+      const row = b.closest('.host-row');
+      const name = row.querySelector('[data-e-name]').value.trim();
+      const ip = row.querySelector('[data-e-ip]').value.trim();
+      const port = parseInt(row.querySelector('[data-e-port]').value) || 2376;
+      if (!ip) { toast('IP address is required', 'error'); return; }
+      const hosts2 = state.config.hosts.map(h => h.id === b.dataset.save ? { ...h, name: name || ip, host: ip, port } : h);
+      saveCfg({ hosts: hosts2 });
+      editingHostId = null;
+      renderHostsList();
+      renderHostSwitcher();
+      if (b.dataset.save === state.config.activeHostId) {
+        syncActiveHost();
+        api.events.start({ host: state.config.host, port: state.config.port });
+        toast('Host updated — reconnecting…', 'success');
+        await loadDashboard();
+        refreshCertStatus();
+      } else {
+        toast('Host updated', 'success');
+      }
+    }));
+  $('hosts-list').querySelectorAll('[data-activate]').forEach(r =>
+    r.addEventListener('change', () => { switchHost(r.dataset.activate); renderHostsList(); }));
+  $('hosts-list').querySelectorAll('[data-test]').forEach(b =>
+    b.addEventListener('click', async () => {
+      const h = state.config.hosts.find(x => x.id === b.dataset.test);
+      b.disabled = true; b.textContent = '…';
+      const r = await api.docker.info({ host: h.host, port: h.port });
+      b.disabled = false; b.textContent = 'Test';
+      toast(r.ok ? `${h.name}: connected (Docker ${r.data.ServerVersion})` : `${h.name}: ${r.error}`, r.ok ? 'success' : 'error', 5000);
+    }));
+  $('hosts-list').querySelectorAll('[data-certs]').forEach(b =>
+    b.addEventListener('click', async () => {
+      const h = state.config.hosts.find(x => x.id === b.dataset.certs);
+      const r = await api.certs.import({ hostId: h.id });
+      if (r.canceled) return;
+      if (!r.ok) { toast(r.error || 'Import failed', 'error'); return; }
+      toast(r.active ? `Certificates imported for ${h.name}` : `Imported — still need: ${r.missing.join(', ')}`, r.active ? 'success' : 'info', 5000);
+      refreshCertStatus();
+    }));
+  $('hosts-list').querySelectorAll('[data-remove]').forEach(b =>
+    b.addEventListener('click', () => {
+      const h = state.config.hosts.find(x => x.id === b.dataset.remove);
+      if (!confirm(`Remove host "${h.name}"?`)) return;
+      const hosts = state.config.hosts.filter(x => x.id !== h.id);
+      const patch = { hosts };
+      if (state.config.activeHostId === h.id) patch.activeHostId = hosts[0].id;
+      saveCfg(patch);
+      if (patch.activeHostId) switchHost(patch.activeHostId);
+      renderHostsList();
+      renderHostSwitcher();
+    }));
+}
+
+$('add-host-btn').addEventListener('click', () => {
+  const name = $('new-host-name').value.trim();
+  const ip = $('new-host-ip').value.trim();
+  const port = parseInt($('new-host-port').value) || 2376;
+  if (!ip) { toast('Enter the host IP', 'error'); return; }
+  const h = { id: 'h' + Date.now().toString(36), name: name || ip, host: ip, port };
+  saveCfg({ hosts: [...(state.config.hosts || []), h] });
+  if (state.config.hosts.length === 1) { saveCfg({ activeHostId: h.id }); syncActiveHost(); loadDashboard(); }
+  $('new-host-name').value = ''; $('new-host-ip').value = '';
+  renderHostsList();
+  renderHostSwitcher();
+  toast(`Added ${h.name} — use Test to verify, and Certs… if it needs its own certificates`, 'success', 5000);
+});
+
+async function loadSettings() {
+  renderHostsList();
+  applyTheme(state.config.theme || 'system');
+  document.querySelectorAll('#logo-picker .logo-swatch').forEach(s =>
+    s.classList.toggle('active', s.dataset.logo === (state.config.logo || 'teal')));
+  api.appx.getLoginItem().then(v => { $('setting-autostart').checked = v; });
+  $('setting-tray').checked = state.config.trayEnabled !== false;
+  refreshCertStatus();
+}
+
+// Menu bar toggle
+$('setting-tray').addEventListener('change', async (e) => {
+  const v = e.target.checked;
+  saveCfg({ trayEnabled: v });
+  await api.setTray(v);
+  toast(v ? 'Menu bar companion enabled' : 'Menu bar icon hidden — closing the window now quits', 'info', 4500);
+});
+
+// Theme picker
+document.querySelectorAll('#theme-picker .seg-btn').forEach(b =>
+  b.addEventListener('click', () => {
+    saveCfg({ theme: b.dataset.themeOpt });
+    applyTheme(b.dataset.themeOpt);
+  }));
+
+// Logo picker
+document.querySelectorAll('#logo-picker .logo-swatch').forEach(s =>
+  s.addEventListener('click', () => {
+    saveCfg({ logo: s.dataset.logo });
+    applyLogo(s.dataset.logo);
+    toast('Logo updated', 'success');
+  }));
+
+// Autostart
+$('setting-autostart').addEventListener('change', async (e) => {
+  const v = await api.appx.setLoginItem(e.target.checked);
+  toast(v ? 'Portside will launch at login' : 'Autostart disabled', 'info');
+});
+
+// Cert import / reset (for the active host)
+$('cert-import-btn').addEventListener('click', async () => {
+  const h = activeHost();
+  const r = await api.certs.import({ hostId: h ? h.id : null });
+  if (r.canceled) return;
+  if (!r.ok) { toast(r.error || 'Import failed', 'error'); return; }
+  if (r.active) {
+    toast('Certificates imported — testing connection…', 'success');
+    const t = await api.docker.info(state.config);
+    toast(t.ok ? `Connected with new certs (Docker ${t.data.ServerVersion})` : 'New certs failed: ' + t.error, t.ok ? 'success' : 'error', 5000);
+  } else {
+    toast(`Imported ${r.placed.length} file(s) — still need: ${r.missing.join(', ')}`, 'info', 6000);
+  }
+  refreshCertStatus();
+});
+
+$('cert-reset-btn').addEventListener('click', async () => {
+  if (!confirm('Remove imported certificates and revert to the bundled ones?')) return;
+  const h = activeHost();
+  await api.certs.reset({ hostId: h ? h.id : null });
+  await api.certs.reset({});
+  toast('Reverted to bundled certificates', 'success');
+  refreshCertStatus();
+});
+
+$('save-interval-btn').addEventListener('click', () => {
+  state.refreshInterval = parseInt($('setting-interval').value);
+  saveCfg({ refreshInterval: state.refreshInterval });
+  startAutoRefresh();
+  toast(state.refreshInterval ? `Auto refresh: every ${state.refreshInterval/1000}s` : 'Auto refresh off', 'info');
+});
+
+// ─── Auto-refresh ─────────────────────────────────────────────────────────────
+function startAutoRefresh() {
+  if (state.refreshTimer) clearInterval(state.refreshTimer);
+  if (!state.refreshInterval || !state.config.host) return;
+  state.refreshTimer = setInterval(loadDashboard, state.refreshInterval);
+}
+
+// ─── Refresh buttons ──────────────────────────────────────────────────────────
+$('refresh-btn').addEventListener('click', loadDashboard);
+$('dash-refresh-btn').addEventListener('click', loadDashboard);
+$('containers-refresh-btn').addEventListener('click', async () => {
+  state.containers = [];
+  await loadDashboard();
+  renderContainersList();
+});
+$('containers-show-all-btn').addEventListener('click', () => {
+  state.showAllContainers = !state.showAllContainers;
+  const btn = $('containers-show-all-btn');
+  btn.textContent = state.showAllContainers ? 'Running Only' : 'Show All';
+  renderContainersList();
+});
+$('images-refresh-btn').addEventListener('click', async () => { state.images = []; await loadImages(); });
+$('volumes-refresh-btn').addEventListener('click', async () => { state.volumes = []; await loadVolumes(); });
+$('networks-refresh-btn').addEventListener('click', async () => { state.networks = []; await loadNetworks(); });
+
+// ─── Tray-driven events ───────────────────────────────────────────────────────
+api.onRefresh(() => loadDashboard());
+api.onOpenContainer((id) => {
+  showPage('containers');
+  renderContainersList();
+  openDetail(id);
+});
+
+// ─── Startup splash ───────────────────────────────────────────────────────────
+setTimeout(() => {
+  const sp = $('splash');
+  sp.classList.add('done');
+  sp.addEventListener('transitionend', () => sp.remove(), { once: true });
+}, 1900);
+
+// ─── Start ────────────────────────────────────────────────────────────────────
+init();
+</script>
+</body>
+</html>

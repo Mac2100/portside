@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --bg0: rgba(13,17,23,0.92); --bg1: #161b22; --bg2: #21262d; --bg3: #30363d;
+    --border: #30363d; --text: #e6edf3; --text-muted: #8b949e;
+    --accent: #58a6ff; --running: #3fb950; --stopped: #f85149; --warn: #d29922; --danger: #f85149;
+  }
+  :root[data-theme="light"] {
+    --bg0: rgba(246,248,250,0.95); --bg1: #ffffff; --bg2: #eaeef2; --bg3: #d0d7de;
+    --border: #d0d7de; --text: #1f2328; --text-muted: #59636e;
+    --accent: #0969da; --running: #1a7f37; --stopped: #d1242f; --warn: #9a6700; --danger: #d1242f;
+  }
+  html, body { height: 100%; background: transparent; font-family: -apple-system, BlinkMacSystemFont, sans-serif; font-size: 12px; color: var(--text); user-select: none; overflow: hidden; }
+  #panel {
+    height: 100%; display: flex; flex-direction: column;
+    background: var(--bg0);
+    backdrop-filter: blur(24px);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    overflow: hidden;
+    box-shadow: 0 10px 40px rgba(0,0,0,0.35);
+  }
+  /* header */
+  #hdr { display: flex; align-items: center; gap: 8px; padding: 12px 14px 8px; }
+  #hdr .name { font-size: 13px; font-weight: 700; }
+  #hdr .pill {
+    margin-left: auto; font-size: 10px; font-weight: 600;
+    padding: 2px 9px; border-radius: 10px;
+    background: rgba(63,185,80,0.18); color: var(--running);
+  }
+  #hdr .pill.bad { background: rgba(248,81,73,0.18); color: var(--danger); }
+  /* rings */
+  #rings { display: flex; justify-content: space-around; padding: 6px 10px 4px; }
+  .ringbox { display: flex; flex-direction: column; align-items: center; gap: 3px; }
+  .ringwrap { position: relative; width: 54px; height: 54px; }
+  .ringwrap svg { transform: rotate(-90deg); }
+  .ring-track { fill: none; stroke: var(--bg3); stroke-width: 6; }
+  .ring-fill { fill: none; stroke-width: 6; stroke-linecap: round; transition: stroke-dashoffset 0.5s, stroke 0.3s; }
+  .ringlabel { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; }
+  .ringcap { font-size: 9px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; }
+  /* sparkline */
+  #spark-card { margin: 6px 12px; background: var(--bg1); border: 1px solid var(--border); border-radius: 10px; padding: 8px 10px 4px; }
+  #spark-title { font-size: 9px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 2px; display: flex; justify-content: space-between; }
+  #spark { width: 100%; height: 38px; display: block; }
+  /* container list */
+  #list { flex: 1; overflow-y: auto; margin: 6px 6px 4px 12px; padding-right: 4px; }
+  #list::-webkit-scrollbar { width: 4px; }
+  #list::-webkit-scrollbar-thumb { background: var(--bg3); border-radius: 2px; }
+  .row { display: flex; align-items: center; gap: 8px; padding: 5px 8px; border-radius: 8px; }
+  .row:hover { background: var(--bg2); }
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--stopped); flex-shrink: 0; }
+  .dot.on { background: var(--running); }
+  .rname { flex: 1; font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .rcpu { font-size: 10px; color: var(--text-muted); min-width: 38px; text-align: right; font-variant-numeric: tabular-nums; }
+  .racts { display: none; gap: 3px; }
+  .row:hover .racts { display: flex; }
+  .row:hover .rcpu { display: none; }
+  .ract {
+    border: none; background: var(--bg3); color: var(--text);
+    width: 20px; height: 20px; border-radius: 5px; font-size: 10px;
+    cursor: pointer; display: flex; align-items: center; justify-content: center;
+  }
+  .ract:hover { background: var(--accent); color: #fff; }
+  .ract.stop:hover { background: var(--danger); }
+  /* footer */
+  #ftr { display: flex; gap: 8px; padding: 8px 12px 12px; border-top: 1px solid var(--border); }
+  .fbtn {
+    flex: 1; border: 1px solid var(--border); background: var(--bg2); color: var(--text);
+    padding: 6px 0; border-radius: 8px; font-size: 11.5px; font-weight: 600;
+    font-family: inherit; cursor: pointer;
+  }
+  .fbtn:hover { background: var(--bg3); }
+  .fbtn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .fbtn.quit { flex: 0 0 38px; color: var(--text-muted); }
+  .fbtn.quit:hover { color: var(--danger); border-color: var(--danger); }
+  #empty { text-align: center; color: var(--text-muted); padding: 20px 0; font-size: 11px; }
+</style>
+</head>
+<body>
+<div id="panel">
+  <div id="hdr">
+    <svg id="hdr-logo" width="17" height="17" viewBox="180 130 664 780" xmlns="http://www.w3.org/2000/svg"></svg>
+    <span class="name">Portside</span>
+    <span class="pill" id="status-pill">—</span>
+  </div>
+  <div id="rings">
+    <div class="ringbox"><div class="ringwrap" id="r-cpu"></div><span class="ringcap">CPU</span></div>
+    <div class="ringbox"><div class="ringwrap" id="r-mem"></div><span class="ringcap">Memory</span></div>
+    <div class="ringbox"><div class="ringwrap" id="r-cont"></div><span class="ringcap">Running</span></div>
+  </div>
+  <div id="spark-card">
+    <div id="spark-title"><span>CPU history</span><span id="spark-now"></span></div>
+    <canvas id="spark"></canvas>
+  </div>
+  <div id="list"><div id="empty">Waiting for data…</div></div>
+  <div id="ftr">
+    <button class="fbtn primary" id="open-btn">Open Portside</button>
+    <button class="fbtn quit" id="quit-btn" title="Quit Portside">⏻</button>
+  </div>
+</div>
+<script>
+const api = window.portside;
+const $ = id => document.getElementById(id);
+const PALETTES = {
+  teal:   ['#1d4ed8','#2563eb','#3b82f6','#0284c7','#0ea5e9','#38bdf8','#0d9488','#14b8a6','#2dd4bf'],
+  violet: ['#4f46e5','#6366f1','#818cf8','#7c3aed','#8b5cf6','#a78bfa','#9333ea','#a855f7','#c084fc'],
+  sunset: ['#dc2626','#ef4444','#f87171','#ea580c','#f97316','#fb923c','#d97706','#f59e0b','#fbbf24'],
+  mono:   ['#334155','#475569','#64748b','#526079','#64748b','#94a3b8','#5b6b7f','#7c8aa0','#cbd5e1']
+};
+const POLYS = [
+  '512,720 742,605 742,735 512,850','282,605 512,720 512,850 282,735','512,490 742,605 512,720 282,605',
+  '512,590 742,475 742,605 512,720','282,475 512,590 512,720 282,605','512,360 742,475 512,590 282,475',
+  '512,460 742,345 742,475 512,590','282,345 512,460 512,590 282,475','512,230 742,345 512,460 282,345'
+];
+const mq = window.matchMedia('(prefers-color-scheme: light)');
+let lastData = null;
+
+function setLogo(variant) {
+  const pal = PALETTES[variant] || PALETTES.teal;
+  $('hdr-logo').innerHTML = POLYS.map((p, i) => `<polygon points="${p}" fill="${pal[i]}"/>`).join('');
+}
+
+function ring(id, pct, label, invert) {
+  const el = $(id);
+  pct = Math.max(0, Math.min(pct || 0, 100));
+  const R = 23, C = 2 * Math.PI * R;
+  if (!el.dataset.init) {
+    el.innerHTML = `<svg width="54" height="54" viewBox="0 0 54 54">
+      <circle class="ring-track" cx="27" cy="27" r="${R}"/>
+      <circle class="ring-fill" cx="27" cy="27" r="${R}" stroke-dasharray="${C}" stroke-dashoffset="${C}"/>
+    </svg><div class="ringlabel"></div>`;
+    el.dataset.init = '1';
+  }
+  const f = el.querySelector('.ring-fill');
+  f.style.stroke = invert ? 'var(--running)' : (pct < 60 ? '#3fb950' : pct < 80 ? '#d29922' : '#f85149');
+  f.style.strokeDashoffset = C * (1 - pct / 100);
+  el.querySelector('.ringlabel').textContent = label !== undefined ? label : pct.toFixed(0) + '%';
+}
+
+function spark(data) {
+  const cv = $('spark'), dpr = window.devicePixelRatio || 1;
+  const w = cv.clientWidth || 290, h = cv.clientHeight || 38;
+  cv.width = w * dpr; cv.height = h * dpr;
+  const ctx = cv.getContext('2d');
+  ctx.scale(dpr, dpr); ctx.clearRect(0, 0, w, h);
+  if (!data || data.length < 2) return;
+  const max = 100;
+  const step = w / Math.max(data.length - 1, 29);
+  const x0 = w - (data.length - 1) * step;
+  const yOf = v => h - (Math.min(v, max) / max) * (h - 5) - 2;
+  ctx.beginPath();
+  data.forEach((v, i) => { const x = x0 + i * step; i === 0 ? ctx.moveTo(x, yOf(v)) : ctx.lineTo(x, yOf(v)); });
+  const accent = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim();
+  ctx.strokeStyle = accent; ctx.lineWidth = 1.5; ctx.stroke();
+  ctx.lineTo(x0 + (data.length - 1) * step, h); ctx.lineTo(x0, h); ctx.closePath();
+  const g = ctx.createLinearGradient(0, 0, 0, h);
+  g.addColorStop(0, accent + '55'); g.addColorStop(1, accent + '00');
+  ctx.fillStyle = g; ctx.fill();
+}
+
+function render(d) {
+  lastData = d;
+  const theme = d.theme === 'system' ? (mq.matches ? 'light' : 'dark') : (d.theme || 'dark');
+  document.documentElement.dataset.theme = theme;
+  setLogo(d.logo || 'teal');
+
+  const pill = $('status-pill');
+  pill.textContent = d.alerts ? `⚠ ${d.alerts} alert${d.alerts > 1 ? 's' : ''}` : 'All healthy';
+  pill.className = 'pill' + (d.alerts ? ' bad' : '');
+
+  ring('r-cpu', d.cpu);
+  ring('r-mem', d.memPct);
+  ring('r-cont', d.total ? (d.running / d.total) * 100 : 0, `${d.running}/${d.total}`, true);
+
+  $('spark-now').textContent = d.cpu.toFixed(1) + '%';
+  spark(d.history);
+
+  const rows = (d.containers || []).map(c => `
+    <div class="row" data-id="${c.id}">
+      <div class="dot${c.state === 'running' ? ' on' : ''}"></div>
+      <span class="rname">${c.name}</span>
+      <span class="rcpu">${c.cpu != null ? c.cpu.toFixed(1) + '%' : ''}</span>
+      <div class="racts">
+        ${c.state === 'running'
+          ? `<button class="ract stop" data-act="stop" title="Stop">■</button>
+             <button class="ract" data-act="restart" title="Restart">↻</button>`
+          : `<button class="ract" data-act="start" title="Start">▶</button>`}
+      </div>
+    </div>`).join('');
+  $('list').innerHTML = rows || '<div id="empty">No containers</div>';
+
+  document.querySelectorAll('.ract').forEach(b => b.addEventListener('click', (e) => {
+    e.stopPropagation();
+    b.disabled = true;
+    api.trayPanel.action(b.closest('.row').dataset.id, b.dataset.act);
+  }));
+}
+
+api.trayPanel.onData(render);
+mq.addEventListener('change', () => { if (lastData) render(lastData); });
+$('open-btn').addEventListener('click', () => api.trayPanel.openApp());
+$('quit-btn').addEventListener('click', () => api.trayPanel.quit());
+document.addEventListener('keydown', e => { if (e.key === 'Escape') api.trayPanel.hide(); });
+</script>
+</body>
+</html>

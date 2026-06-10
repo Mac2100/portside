@@ -1,0 +1,15 @@
+# Dependencies & build output
+node_modules/
+dist/
+
+# ⚠️ TLS certificates — NEVER commit these. They are the keys to your NAS.
+certs/*.pem
+certs/*.key
+certs/*.crt
+
+# Local junk
+.DS_Store
+*.log
+npm-debug.log*
+shot*.png
+splash*.png
