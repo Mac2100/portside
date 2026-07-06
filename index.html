@@ -851,6 +851,43 @@
     50%  { opacity: 0.35; }
     to   { opacity: 0.12; }
   }
+
+  /* ── Premium polish (CleanMyMac-style depth — all solid & readable, no see-through) ── */
+  #main { background: linear-gradient(165deg, #10151f 0%, #0d1117 55%, #0b0d12 100%); }
+  .stat-card, .chart-card, .settings-card, #events-list {
+    background: linear-gradient(180deg, #1d232e 0%, #161b22 100%);
+    border: 1px solid rgba(255,255,255,0.06);
+    border-radius: 14px;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.28), inset 0 1px 0 rgba(255,255,255,0.045);
+  }
+  .insight-item {
+    background: linear-gradient(180deg, #1d232e 0%, #171c24 100%);
+    border-radius: 12px;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.22), inset 0 1px 0 rgba(255,255,255,0.04);
+  }
+  .btn { border-radius: 8px; }
+  .btn-primary {
+    background: linear-gradient(180deg, #6cb1ff 0%, #4a90e6 100%) !important;
+    border-color: #4a90e6 !important; color: #ffffff !important;
+    box-shadow: 0 2px 8px rgba(74,144,230,0.35), inset 0 1px 0 rgba(255,255,255,0.25);
+  }
+  .btn-primary:hover { background: linear-gradient(180deg, #82bcff 0%, #5b9df0 100%) !important; }
+  .nav-item { border-radius: 8px; }
+  .nav-item.active {
+    background: linear-gradient(180deg, rgba(88,166,255,0.22), rgba(88,166,255,0.12));
+    box-shadow: inset 0 0 0 1px rgba(88,166,255,0.28), 0 2px 8px rgba(88,166,255,0.12);
+  }
+  /* Light theme */
+  :root[data-theme="light"] #main { background: linear-gradient(165deg, #eef2f7 0%, #f6f8fa 60%, #e9edf2 100%); }
+  :root[data-theme="light"] .stat-card,
+  :root[data-theme="light"] .chart-card,
+  :root[data-theme="light"] .settings-card,
+  :root[data-theme="light"] #events-list {
+    background: linear-gradient(180deg, #ffffff 0%, #f7f9fb 100%);
+    border-color: rgba(0,0,0,0.07);
+    box-shadow: 0 4px 16px rgba(0,0,0,0.08), inset 0 1px 0 rgba(255,255,255,0.6);
+  }
+  :root[data-theme="light"] .insight-item { background: #ffffff; }
 </style>
 <link rel="stylesheet" href="node_modules/@xterm/xterm/css/xterm.css">
 </head>
@@ -1208,6 +1245,10 @@
             <input type="checkbox" id="setting-tray" checked>
             <label for="setting-tray" style="font-size:13px;cursor:pointer">Show menu bar companion</label>
           </div>
+          <div class="switch-row" style="margin-top:10px">
+            <input type="checkbox" id="setting-alertbadge" checked>
+            <label for="setting-alertbadge" style="font-size:13px;cursor:pointer">Show alert count on the icon &amp; menu bar</label>
+          </div>
           <div class="form-hint" style="margin-top:6px">With the menu bar icon off, closing the window quits the app (no background monitoring or notifications).</div>
         </div>
 
@@ -1388,6 +1429,44 @@
       <span id="deploy-status" style="font-size:11px;color:var(--text-muted);margin-right:auto;align-self:center"></span>
       <button class="btn" id="deploy-cancel-btn">Cancel</button>
       <button class="btn btn-success" id="deploy-go-btn">Deploy</button>
+    </div>
+  </div>
+</div>
+
+<!-- Git Deploy modal -->
+<div class="modal-overlay" id="gitdeploy-modal">
+  <div class="modal" style="width:640px">
+    <div class="modal-header">
+      <span style="font-size:15px">⬆</span>
+      <span class="modal-title" id="gd-title">Git Deploy</span>
+      <button class="btn btn-icon" id="gd-close-btn">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="deploy-label" style="margin-top:0">GitHub repo URL</div>
+      <input class="form-input" id="gd-repo" placeholder="https://github.com/Mac2100/SignPro.git" spellcheck="false">
+      <div style="display:flex;gap:14px">
+        <div style="flex:1">
+          <div class="deploy-label">Branch</div>
+          <input class="form-input" id="gd-branch" placeholder="main" spellcheck="false">
+        </div>
+        <div style="flex:2">
+          <div class="deploy-label">App folder on the NAS (bind mount)</div>
+          <input class="form-input font-mono" id="gd-folder" placeholder="/share/Docker/.../app" spellcheck="false" style="font-size:11px">
+        </div>
+      </div>
+      <div class="deploy-label">Read-only token <span style="color:var(--text-muted);font-weight:400">· shared by every app</span> <span id="gd-token-state" style="color:var(--text-muted);font-weight:400"></span></div>
+      <input class="form-input" id="gd-token" type="password" placeholder="github_pat_… — paste once, used for all apps (blank = keep current)" spellcheck="false" autocomplete="off">
+      <div style="display:flex;gap:8px;align-items:center;margin-top:14px;flex-wrap:wrap">
+        <button class="btn btn-success" id="gd-deploy-btn">⬆ Pull latest &amp; restart</button>
+        <button class="btn" id="gd-versions-btn">↻ Load versions…</button>
+        <select class="form-input" id="gd-versions" style="display:none;flex:1;min-width:180px"></select>
+        <button class="btn btn-warn" id="gd-rollback-btn" style="display:none">⤺ Deploy selected</button>
+      </div>
+      <pre id="gd-output" class="font-mono" style="display:none;margin-top:12px;max-height:220px;overflow:auto;background:var(--bg-inset,#0a0e14);border:1px solid var(--border,#30363d);border-radius:6px;padding:10px;font-size:11px;white-space:pre-wrap;line-height:1.5"></pre>
+    </div>
+    <div class="modal-footer">
+      <span id="gd-status" style="font-size:11px;color:var(--text-muted);margin-right:auto;align-self:center"></span>
+      <button class="btn" id="gd-close-btn2">Close</button>
     </div>
   </div>
 </div>
@@ -1646,8 +1725,22 @@ async function checkAppUpdate(announce) {
   state.appUpdate = r;
   $('about-version').textContent = 'v' + r.current;
   if (r.newer) {
-    $('about-update-status').innerHTML = `🎉 v${r.latest} available — <span class="crumb" id="get-update-link">download from GitHub</span>`;
-    document.getElementById('get-update-link').addEventListener('click', () => api.openUrl(r.url));
+    const dl = r.dmgUrl
+      ? `<button class="btn btn-primary" id="get-update-btn" style="margin-top:6px">⬇ Download &amp; install v${r.latest}</button> <span id="update-progress" style="font-size:11px;color:var(--text-muted)"></span>`
+      : `<span class="crumb" id="get-update-link">open the release on GitHub</span>`;
+    $('about-update-status').innerHTML = `🎉 v${r.latest} available. ${dl}`;
+    if (r.dmgUrl) {
+      $('get-update-btn').addEventListener('click', async () => {
+        const btn = $('get-update-btn'); btn.disabled = true;
+        api.appUpdate.onProgress((p) => { $('update-progress').textContent = 'Downloading… ' + p + '%'; });
+        toast('Downloading the installer…', 'info', 6000);
+        const d = await api.appUpdate.download({ url: r.dmgUrl, name: r.assetName });
+        if (d.ok) { $('update-progress').textContent = 'Installer opened — drag Portside → Applications, then reopen.'; toast('Installer opened — drag Portside into Applications, then reopen', 'success', 9000); }
+        else { $('update-progress').textContent = ''; btn.disabled = false; toast('Download failed: ' + d.error, 'error'); }
+      });
+    } else {
+      document.getElementById('get-update-link').addEventListener('click', () => api.openUrl(r.url));
+    }
     if (announce) toast(`Portside v${r.latest} is available — see Settings`, 'info', 6000);
     renderInsights(state.lastPer || []);
   } else if (announce) {
@@ -1903,17 +1996,26 @@ function setRing(id, pct, label, invertColor) {
 state.chartRange = 'live';
 
 async function drawAllCharts() {
-  let cpu, mem, rx, tx;
+  let cpu, mem, rx, tx, t;
   if (state.chartRange === 'live') {
-    ({ cpu, mem, rx, tx } = state.history);
+    ({ cpu, mem, rx, tx, t } = state.history);
   } else {
     const ms = state.chartRange === '24h' ? 86400e3 : 7 * 86400e3;
     const h = await api.history.get({ ms, host: state.config.host });
-    cpu = h.cpu; mem = h.mem; rx = h.rx; tx = h.tx;
+    cpu = h.cpu; mem = h.mem; rx = h.rx; tx = h.tx; t = h.t;
   }
-  drawChart('chart-cpu', [{ data: cpu, color: '#58a6ff' }], 100);
-  drawChart('chart-mem', [{ data: mem, color: '#bc8cff' }], 100);
-  drawChart('chart-net', [{ data: rx, color: '#3fb950' }, { data: tx, color: '#d29922' }]);
+  drawChart('chart-cpu', [{ data: cpu, color: '#58a6ff' }], 100, { times: t, kind: 'pct' });
+  drawChart('chart-mem', [{ data: mem, color: '#bc8cff' }], 100, { times: t, kind: 'pct' });
+  drawChart('chart-net', [{ data: rx, color: '#3fb950' }, { data: tx, color: '#d29922' }], null, { times: t, kind: 'rate' });
+}
+
+function timeLabel(t) {
+  if (!t) return '';
+  const d = new Date(t);
+  const hm = d.getHours() + ':' + String(d.getMinutes()).padStart(2, '0');
+  if (state.chartRange === '7d') return (d.getMonth() + 1) + '/' + d.getDate();
+  if (state.chartRange === '24h') return hm;
+  return hm + ':' + String(d.getSeconds()).padStart(2, '0');
 }
 
 document.querySelectorAll('#range-picker .seg-btn').forEach(b =>
@@ -1924,9 +2026,29 @@ document.querySelectorAll('#range-picker .seg-btn').forEach(b =>
   }));
 
 // ─── Canvas charts ────────────────────────────────────────────────────────────
-function drawChart(id, series, fixedMax) {
+const chartState = {};
+function fmtChartVal(v, kind) {
+  if (kind === 'rate') return fmt(v) + '/s';
+  return (v < 10 ? v.toFixed(1) : Math.round(v)) + '%';
+}
+
+function drawChart(id, series, fixedMax, opts = {}) {
   const cv = $(id);
   if (!cv) return;
+  chartState[id] = { series, fixedMax, opts };
+  renderChart(id);
+  if (!cv._hoverWired) {
+    cv._hoverWired = true;
+    cv.addEventListener('mousemove', (e) => { const r = cv.getBoundingClientRect(); renderChart(id, e.clientX - r.left); });
+    cv.addEventListener('mouseleave', () => renderChart(id));
+  }
+}
+
+function renderChart(id, hoverX) {
+  const st = chartState[id]; if (!st) return;
+  const { series, fixedMax, opts } = st;
+  const kind = opts.kind || 'pct', times = opts.times || [];
+  const cv = $(id); if (!cv) return;
   const dpr = window.devicePixelRatio || 1;
   const w = cv.clientWidth || 400, h = cv.clientHeight || 110;
   cv.width = w * dpr; cv.height = h * dpr;
@@ -1934,33 +2056,72 @@ function drawChart(id, series, fixedMax) {
   ctx.scale(dpr, dpr);
   ctx.clearRect(0, 0, w, h);
 
-  ctx.strokeStyle = 'rgba(48,54,61,0.55)';
-  ctx.lineWidth = 1;
-  for (let i = 1; i < 4; i++) {
-    const y = (h * i) / 4;
-    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke();
-  }
-
   const allVals = series.flatMap(s => s.data);
   if (!allVals.length) return;
   const max = fixedMax || Math.max(...allVals, 1) * 1.25;
+  const padL = 40, padR = 10, padT = 6, padB = 16;
+  const plotW = w - padL - padR, plotH = h - padT - padB;
+  const muted = (getComputedStyle(document.body).getPropertyValue('--text-muted') || '#8b949e').trim();
+  ctx.font = '9px -apple-system, BlinkMacSystemFont, sans-serif';
+
+  // Gridlines + value axis (left)
+  ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
+  const rows = 4;
+  for (let i = 0; i <= rows; i++) {
+    const y = padT + (plotH * i) / rows;
+    ctx.strokeStyle = 'rgba(140,150,165,0.13)'; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(padL, y); ctx.lineTo(padL + plotW, y); ctx.stroke();
+    ctx.fillStyle = muted;
+    ctx.fillText(fmtChartVal(max * (1 - i / rows), kind), padL - 5, y);
+  }
+
+  const primary = series[0].data;
+  const n = Math.max(primary.length, 30);
+  const step = plotW / (n - 1);
+  const x0 = padL + plotW - (primary.length - 1) * step;
+  const xOf = i => x0 + i * step;
+  const yOf = v => padT + plotH - (Math.min(v, max) / max) * plotH;
 
   for (const s of series) {
     const data = s.data;
     if (data.length < 2) continue;
-    const n = Math.max(data.length, 30);
-    const step = w / (n - 1);
-    const x0 = w - (data.length - 1) * step;
-    const yOf = v => h - (Math.min(v, max) / max) * (h - 8) - 3;
-
     ctx.beginPath();
-    data.forEach((v, i) => { const x = x0 + i * step; i === 0 ? ctx.moveTo(x, yOf(v)) : ctx.lineTo(x, yOf(v)); });
+    data.forEach((v, i) => { const x = xOf(i); i === 0 ? ctx.moveTo(x, yOf(v)) : ctx.lineTo(x, yOf(v)); });
     ctx.strokeStyle = s.color; ctx.lineWidth = 1.5; ctx.stroke();
-
-    ctx.lineTo(x0 + (data.length - 1) * step, h); ctx.lineTo(x0, h); ctx.closePath();
-    const g = ctx.createLinearGradient(0, 0, 0, h);
+    ctx.lineTo(xOf(data.length - 1), padT + plotH); ctx.lineTo(xOf(0), padT + plotH); ctx.closePath();
+    const g = ctx.createLinearGradient(0, padT, 0, padT + plotH);
     g.addColorStop(0, s.color + '4d'); g.addColorStop(1, s.color + '00');
     ctx.fillStyle = g; ctx.fill();
+  }
+
+  // Time axis (bottom)
+  ctx.fillStyle = muted; ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+  const tickN = 4;
+  for (let i = 0; i <= tickN; i++) {
+    const di = Math.round((primary.length - 1) * i / tickN);
+    const lbl = i === tickN ? 'now' : timeLabel(times[di]);
+    if (lbl) ctx.fillText(lbl, Math.max(padL + 14, Math.min(xOf(di), padL + plotW - 14)), h - padB + 3);
+  }
+
+  // Hover crosshair + tooltip
+  if (hoverX != null && hoverX >= padL - 6 && hoverX <= padL + plotW + 6 && primary.length) {
+    const idx = Math.max(0, Math.min(primary.length - 1, Math.round((hoverX - x0) / step)));
+    const hx = xOf(idx);
+    ctx.strokeStyle = 'rgba(140,150,165,0.5)'; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(hx, padT); ctx.lineTo(hx, padT + plotH); ctx.stroke();
+    series.forEach(s => { if (s.data[idx] != null) { ctx.beginPath(); ctx.arc(hx, yOf(s.data[idx]), 2.6, 0, 7); ctx.fillStyle = s.color; ctx.fill(); } });
+    const lines = series.map((s, si) => (series.length > 1 ? (si === 0 ? '↓ ' : '↑ ') : '') + fmtChartVal(s.data[idx] || 0, kind));
+    const tstr = times[idx] ? new Date(times[idx]).toLocaleTimeString() : '';
+    const rowsTxt = [tstr, ...lines].filter(Boolean);
+    ctx.font = '10px -apple-system, BlinkMacSystemFont, sans-serif'; ctx.textBaseline = 'top';
+    const bw = Math.max(...rowsTxt.map(l => ctx.measureText(l).width)) + 12;
+    const bh = rowsTxt.length * 13 + 7;
+    let bx = hx + 9; if (bx + bw > padL + plotW) bx = hx - bw - 9;
+    const by = padT + 2;
+    ctx.fillStyle = 'rgba(20,24,32,0.92)';
+    if (ctx.roundRect) { ctx.beginPath(); ctx.roundRect(bx, by, bw, bh, 5); ctx.fill(); } else ctx.fillRect(bx, by, bw, bh);
+    ctx.fillStyle = '#e6edf3'; ctx.textAlign = 'left';
+    rowsTxt.forEach((l, li) => ctx.fillText(l, bx + 6, by + 4 + li * 13));
   }
 }
 
@@ -2087,11 +2248,13 @@ function renderInsights(per) {
   const alerts = items.filter(i => i.sev === 'crit' || i.sev === 'warn').length;
   if (!alerts) items.unshift({ sev: 'good', icon: '✓', title: 'All systems healthy', sub: 'No alerts across your containers', value: '' });
 
+  const showBadge = state.config.alertBadge !== false;
+  const shown = showBadge ? alerts : 0;
   const badge = $('nav-alerts-count');
-  badge.style.display = alerts ? '' : 'none';
-  badge.textContent = alerts;
-  state.alertCount = alerts;
-  api.dockBadge(alerts);
+  badge.style.display = shown ? '' : 'none';
+  badge.textContent = shown;
+  state.alertCount = shown;      // feeds tray + dock; real alerts still render in the list below
+  api.dockBadge(shown);
 
   $('insights-list').innerHTML = items.map(i => `
     <div class="insight-item ${i.sev}${i.cid ? ' clickable' : ''}"${i.cid ? ` data-cid="${i.cid}"` : ''}>
@@ -2213,15 +2376,9 @@ function renderContainerTable(targetId, containers) {
       if (action === 'logs') { openLogs(id, btn.closest('tr').dataset.name); return; }
       if (action === 'console') { openTerminalFor(id); return; }
       if (action === 'web') { api.openUrl(`http://${state.config.host}:${btn.dataset.wport}`); return; }
-      btn.disabled = true;
-      const r = await api.docker.action({ ...state.config, id, action });
-      if (r.ok) {
-        toast(`Container ${action}ed`, 'success');
-        setTimeout(() => loadDashboard(), 1500);
-      } else {
-        toast(r.error || 'Action failed', 'error');
-        btn.disabled = false;
-      }
+      const rowName = btn.closest('tr') ? btn.closest('tr').dataset.name : id.slice(0, 12);
+      const ok = await runContainerAction(id, action, rowName, btn);
+      if (ok) setTimeout(() => loadDashboard(), 1500);
     });
   });
 
@@ -2276,6 +2433,20 @@ function renderContainersList() {
 }
 
 // ─── Detail Panel ─────────────────────────────────────────────────────────────
+const ACTION_VERB = { start:['Start','Starting','Started'], stop:['Stop','Stopping','Stopped'], restart:['Restart','Restarting','Restarted'], remove:['Remove','Removing','Removed'], pause:['Pause','Pausing','Paused'] };
+// Run a container action with immediate feedback: confirm (for disruptive ones), a "…ing" toast, busy button, then result.
+async function runContainerAction(id, action, name, btn) {
+  const v = ACTION_VERB[action] || [action, action + '…', action + 'ed'];
+  if ((action === 'stop' || action === 'restart' || action === 'remove') && !confirm(`${v[0]} container "${name}"?`)) return false;
+  if (btn) btn.disabled = true;
+  toast(`${v[1]} ${name}…`, 'info');
+  const r = await api.docker.action({ ...state.config, id, action });
+  if (r.ok) { toast(`${v[2]} ${name} ✓`, 'success'); return true; }
+  toast(r.error || `${v[0]} failed`, 'error');
+  if (btn) btn.disabled = false;
+  return false;
+}
+
 async function openDetail(id) {
   const c = state.containers.find(x => x.Id === id);
   if (!c) return;
@@ -2297,23 +2468,21 @@ async function openDetail(id) {
     acts.innerHTML = `<button class="btn btn-success" data-action="start" data-id="${id}">▶ Start</button>`;
   }
   acts.innerHTML += `<button class="btn btn-danger" data-action="remove" data-id="${id}">✕ Remove</button>`;
+  acts.innerHTML += `<button class="btn" id="detail-gitdeploy-btn" title="Pull latest from GitHub & restart">⬆ Deploy</button>`;
 
   acts.querySelectorAll('[data-action]').forEach(btn => {
     btn.addEventListener('click', async () => {
       const action = btn.dataset.action;
-      if (action === 'remove' && !confirm(`Remove container "${name}"?`)) return;
-      btn.disabled = true;
-      const r = await api.docker.action({ ...state.config, id, action });
-      if (r.ok) {
-        toast(`Container ${action}ed`, 'success');
+      const ok = await runContainerAction(id, action, name, btn);
+      if (ok) {
         if (action === 'remove') closeDetail();
         setTimeout(loadDashboard, 1500);
-      } else {
-        toast(r.error || 'Failed', 'error');
-        btn.disabled = false;
       }
     });
   });
+
+  const gd = $('detail-gitdeploy-btn');
+  if (gd) gd.onclick = () => openGitDeploy(id, name);
 
   // Info section
   const ports = (c.Ports || []).filter(p => p.PublicPort).map(p => `${p.IP || '0.0.0.0'}:${p.PublicPort} → ${p.PrivatePort}/${p.Type || 'tcp'}`);
@@ -2844,6 +3013,84 @@ function openDeploy() {
 }
 function closeDeploy() { $('deploy-modal').classList.remove('open'); }
 
+// ─── Git Deploy (pull the app folder from GitHub & restart, from within Portside) ─
+let gdKey = null, gdRestartId = null;
+
+async function openGitDeploy(id, name) {
+  gdKey = name; gdRestartId = id;
+  $('gd-title').textContent = 'Git Deploy — ' + name;
+  const out = $('gd-output'); out.style.display = 'none'; out.textContent = '';
+  $('gd-versions').style.display = 'none'; $('gd-rollback-btn').style.display = 'none';
+  $('gd-status').textContent = ''; $('gd-token').value = '';
+
+  const saved = await api.gitdeploy.get({ key: name });
+  $('gd-repo').value = (saved && saved.repoUrl) || '';
+  $('gd-branch').value = (saved && saved.branch) || 'main';
+  $('gd-folder').value = (saved && saved.folder) || '';
+  $('gd-token-state').textContent = (saved && saved.hasToken) ? '· saved ✓' : '· none yet';
+
+  if (!$('gd-folder').value) {
+    try {
+      const ins = await api.docker.inspect({ ...state.config, id });
+      const binds = ((ins.data && ins.data.Mounts) || []).filter(m => m.Type === 'bind');
+      const appBind = binds.find(m => m.Destination === '/app') || binds.find(m => /\/app$/.test(m.Destination || '')) || binds[0];
+      if (appBind) $('gd-folder').value = appBind.Source;
+    } catch {}
+  }
+  $('gitdeploy-modal').classList.add('open');
+}
+function closeGitDeploy() { $('gitdeploy-modal').classList.remove('open'); gdKey = null; gdRestartId = null; }
+
+async function gdSave() {
+  await api.gitdeploy.set({
+    key: gdKey,
+    repoUrl: $('gd-repo').value.trim(),
+    branch: $('gd-branch').value.trim() || 'main',
+    folder: $('gd-folder').value.trim(),
+    token: $('gd-token').value
+  });
+  if ($('gd-token').value) { $('gd-token').value = ''; $('gd-token-state').textContent = '· saved ✓'; }
+}
+function gdValid() {
+  if (!$('gd-repo').value.trim()) { toast('Enter the GitHub repo URL', 'error'); return false; }
+  if (!$('gd-folder').value.trim()) { toast('Enter the app folder path', 'error'); return false; }
+  return true;
+}
+async function gdDeploy(ref) {
+  if (!gdValid()) return;
+  await gdSave();
+  const out = $('gd-output'); out.style.display = ''; out.textContent = (ref ? 'Rolling back' : 'Pulling latest') + '…';
+  $('gd-status').textContent = 'Working…';
+  ['gd-deploy-btn','gd-versions-btn','gd-rollback-btn'].forEach(b => $(b).disabled = true);
+  const r = await api.gitdeploy.run({ ...state.config, key: gdKey, ref: ref || 'latest', restartId: gdRestartId });
+  ['gd-deploy-btn','gd-versions-btn','gd-rollback-btn'].forEach(b => $(b).disabled = false);
+  $('gd-status').textContent = '';
+  if (!r.ok) { out.textContent = (r.output || r.error || 'Failed').trim(); toast((r.error || 'Deploy failed').split('\n')[0], 'error'); return; }
+  out.textContent = (r.output || '').trim();
+  if (r.restartError) toast(r.restartError, 'error');
+  else toast(`Deployed ${r.deployed || ''}${r.restarted ? ' · restarted' : ''}`.trim(), 'success');
+  setTimeout(loadDashboard, 1500);
+}
+async function gdVersions() {
+  if (!gdValid()) return;
+  await gdSave();
+  $('gd-versions-btn').disabled = true; $('gd-status').textContent = 'Fetching versions…';
+  const r = await api.gitdeploy.versions({ ...state.config, key: gdKey });
+  $('gd-versions-btn').disabled = false; $('gd-status').textContent = '';
+  if (!r.ok || !(r.commits && r.commits.length)) { toast(r.error || 'No versions found', 'error'); return; }
+  $('gd-versions').innerHTML = r.commits.map((c, i) =>
+    `<option value="${c.sha}">${i === 0 ? '● latest · ' : ''}${c.sha.slice(0,7)} · ${(c.msg||'').replace(/"/g,'').slice(0,56)}</option>`).join('');
+  $('gd-versions').style.display = ''; $('gd-rollback-btn').style.display = '';
+}
+$('gd-close-btn').addEventListener('click', closeGitDeploy);
+$('gd-close-btn2').addEventListener('click', closeGitDeploy);
+$('gd-deploy-btn').addEventListener('click', () => gdDeploy(null));
+$('gd-versions-btn').addEventListener('click', gdVersions);
+$('gd-rollback-btn').addEventListener('click', () => {
+  const sha = $('gd-versions').value;
+  if (sha && confirm('Deploy commit ' + sha.slice(0,7) + '? This replaces the live files with that version, then restarts.')) gdDeploy(sha);
+});
+
 document.querySelectorAll('.kv-add').forEach(a =>
   a.addEventListener('click', () => $('dep-' + a.dataset.add).appendChild(kvRow(a.dataset.add))));
 $('deploy-btn').addEventListener('click', openDeploy);
@@ -3010,6 +3257,7 @@ async function loadSettings() {
     s.classList.toggle('active', s.dataset.logo === (state.config.logo || 'teal')));
   api.appx.getLoginItem().then(v => { $('setting-autostart').checked = v; });
   $('setting-tray').checked = state.config.trayEnabled !== false;
+  $('setting-alertbadge').checked = state.config.alertBadge !== false;
   refreshCertStatus();
 }
 
@@ -3019,6 +3267,13 @@ $('setting-tray').addEventListener('change', async (e) => {
   saveCfg({ trayEnabled: v });
   await api.setTray(v);
   toast(v ? 'Menu bar companion enabled' : 'Menu bar icon hidden — closing the window now quits', 'info', 4500);
+});
+
+// Alert count badge toggle
+$('setting-alertbadge').addEventListener('change', (e) => {
+  saveCfg({ alertBadge: e.target.checked });
+  loadDashboard();
+  toast(e.target.checked ? 'Alert count shown' : 'Alert count hidden — alerts still listed on the dashboard', 'info', 4000);
 });
 
 // Theme picker

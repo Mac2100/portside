@@ -31,8 +31,10 @@ contextBridge.exposeInMainWorld('portside', {
   },
   openUrl: (url) => ipcRenderer.send('app:open-url', url),
   appUpdate: {
-    version: () => ipcRenderer.invoke('app:version'),
-    check:   () => ipcRenderer.invoke('app:check-update')
+    version:    () => ipcRenderer.invoke('app:version'),
+    check:      () => ipcRenderer.invoke('app:check-update'),
+    download:   (args) => ipcRenderer.invoke('app:download-update', args),
+    onProgress: (cb) => ipcRenderer.on('app:download-progress', (_, pct) => cb(pct))
   },
   events: {
     start:  (args) => ipcRenderer.send('events:start', args),
@@ -69,6 +71,13 @@ contextBridge.exposeInMainWorld('portside', {
   },
   deploy: {
     create: (args) => ipcRenderer.invoke('deploy:create', args)
+  },
+  gitdeploy: {
+    get:      (args) => ipcRenderer.invoke('gitdeploy:get', args),
+    set:      (args) => ipcRenderer.invoke('gitdeploy:set', args),
+    forget:   (args) => ipcRenderer.invoke('gitdeploy:forget', args),
+    versions: (args) => ipcRenderer.invoke('gitdeploy:versions', args),
+    run:      (args) => ipcRenderer.invoke('gitdeploy:run', args)
   },
   logs: {
     start:  (args) => ipcRenderer.invoke('logs:start', args),

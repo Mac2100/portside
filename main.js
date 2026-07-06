@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, shell, dialog, nativeImage, Tray, Menu } = require('electron');
+const { app, BrowserWindow, ipcMain, shell, dialog, nativeImage, Tray, Menu, safeStorage } = require('electron');
 const path = require('path');
 const https = require('https');
 const fs = require('fs');
@@ -727,12 +727,26 @@ ipcMain.handle('app:check-update', async () => {
     const rel = JSON.parse(r.body);
     const latest = (rel.tag_name || '').replace(/^v/, '');
     const current = app.getVersion();
+    const dmg = (rel.assets || []).find(a => /\.dmg$/i.test(a.name)) || (rel.assets || []).find(a => /\.zip$/i.test(a.name));
     return {
       ok: true, current, latest,
       newer: compareVer(latest, current) > 0,
-      url: rel.html_url || `https://github.com/${GITHUB_REPO}/releases`
+      url: rel.html_url || `https://github.com/${GITHUB_REPO}/releases`,
+      dmgUrl: dmg ? dmg.browser_download_url : '',
+      assetName: dmg ? dmg.name : ''
     };
   } catch (e) { return { ok: false, error: e.message }; }
+});
+
+// Download the release installer (.dmg) and open it (drag-to-Applications). No code signing required.
+ipcMain.handle('app:download-update', async (_e, { url, name }) => {
+  try {
+    if (!url) return { ok: false, error: 'That release has no downloadable installer attached.' };
+    const dest = path.join(app.getPath('downloads'), name || 'Portside-update.dmg');
+    await downloadFile(url, dest, (pct) => { if (mainWin && !mainWin.isDestroyed()) mainWin.webContents.send('app:download-progress', pct); });
+    shell.openPath(dest); // mounts the .dmg and opens its window so the user can drag Portside → Applications
+    return { ok: true, path: dest };
+  } catch (err) { return { ok: false, error: err.message }; }
 });
 
 // ─── Image update checker ─────────────────────────────────────────────────────
@@ -756,6 +770,31 @@ function regRequest(method, urlStr, headers = {}, redirects = 0) {
     });
     req.on('error', reject);
     req.setTimeout(15000, () => req.destroy(new Error('Registry timeout')));
+    req.end();
+  });
+}
+
+// Stream a URL to a file (follows redirects — GitHub asset URLs redirect to S3), reporting % progress.
+function downloadFile(url, dest, onProgress, redirects = 0) {
+  return new Promise((resolve, reject) => {
+    const u = new URL(url);
+    const req = https.request({ hostname: u.hostname, port: u.port || 443, path: u.pathname + u.search, method: 'GET', headers: { 'User-Agent': 'Portside-App' } }, (res) => {
+      if ([301, 302, 307, 308].includes(res.statusCode) && res.headers.location && redirects < 5) {
+        res.resume();
+        return downloadFile(new URL(res.headers.location, url).href, dest, onProgress, redirects + 1).then(resolve, reject);
+      }
+      if (res.statusCode !== 200) { res.resume(); return reject(new Error('HTTP ' + res.statusCode)); }
+      const total = parseInt(res.headers['content-length'] || '0', 10);
+      let got = 0;
+      const out = fs.createWriteStream(dest);
+      res.on('data', (c) => { got += c.length; if (total && onProgress) onProgress(Math.round((got / total) * 100)); });
+      res.pipe(out);
+      out.on('finish', () => out.close(() => resolve(dest)));
+      out.on('error', reject);
+      res.on('error', reject);
+    });
+    req.on('error', reject);
+    req.setTimeout(180000, () => req.destroy(new Error('Download timed out')));
     req.end();
   });
 }
@@ -1032,11 +1071,12 @@ function startEvents(host, port) {
   eventsHost = host;
   const agent = createAgent(host);
   if (!agent) return;
-  const filters = encodeURIComponent(JSON.stringify({ type: ['container', 'image', 'volume', 'network'] }));
-  const req = https.request({
-    hostname: host, port: port || 2376,
-    path: `/events?filters=${filters}`, agent
-  }, (res) => {
+  // Reconnect after any failure (error, end, or non-200) — a single hiccup must not kill Activity for good.
+  const reconnect = () => { if (eventsHost === host) setTimeout(() => { if (eventsHost === host && !eventsReq) startEvents(host, port); }, 5000); };
+  const OK_TYPES = ['container', 'image', 'volume', 'network'];
+  // No ?filters= — some Docker/Container Station builds reject the filter form and drop the stream. Filter types here instead.
+  const req = https.request({ hostname: host, port: port || 2376, path: '/events', agent }, (res) => {
+    if (res.statusCode !== 200) { res.resume(); eventsReq = null; reconnect(); return; }
     let acc = '';
     res.on('data', (c) => {
       acc += c.toString();
@@ -1047,13 +1087,15 @@ function startEvents(host, port) {
         try {
           const ev = JSON.parse(line);
           const action = ev.Action || '';
-          if (/^exec_|^top$|^archive/.test(action)) continue; // our own polling noise
+          if (/^exec_|^top$|^archive|^prune$/.test(action)) continue; // our own polling noise
+          const type = ev.Type || 'container';
+          if (!OK_TYPES.includes(type)) continue;
           const attrs = (ev.Actor && ev.Actor.Attributes) || {};
           const item = {
             t: ev.time ? ev.time * 1000 : Date.now(),
-            type: ev.Type, action,
+            type, action,
             name: attrs.name || attrs.image || (ev.Actor && (ev.Actor.ID || '').slice(0, 12)) || '',
-            extra: attrs.exitCode ? 'exit ' + attrs.exitCode : (ev.Type === 'image' ? attrs.name || '' : ''),
+            extra: attrs.exitCode ? 'exit ' + attrs.exitCode : (type === 'image' ? attrs.name || '' : ''),
             host
           };
           eventsBuffer.push(item);
@@ -1062,13 +1104,10 @@ function startEvents(host, port) {
         } catch {}
       }
     });
-    res.on('end', () => {
-      eventsReq = null;
-      if (eventsHost === host) setTimeout(() => { if (eventsHost === host && !eventsReq) startEvents(host, port); }, 5000);
-    });
-    res.on('error', () => {});
+    res.on('end',   () => { eventsReq = null; reconnect(); });
+    res.on('error', () => { eventsReq = null; reconnect(); });
   });
-  req.on('error', () => { eventsReq = null; });
+  req.on('error', () => { eventsReq = null; reconnect(); });
   eventsReq = req;
   req.end();
 }
@@ -1135,6 +1174,144 @@ ipcMain.handle('docker:networks', async (_, { host, port }) => {
   } catch (e) {
     return { ok: false, error: e.message };
   }
+});
+
+// ─── Git Deploy (pull a bind-mounted app folder from GitHub, then restart) ────
+// Deploy a code change without leaving Portside: run a throwaway alpine/git
+// container that's bind-mounted to the app folder, fetch the private repo, and
+// `reset --hard` to the latest commit (or an older one to roll back), then
+// restart the app container. The read-only token is stored ENCRYPTED via Electron
+// safeStorage (macOS Keychain) and handed to the git container only at run-time
+// as an env var — it is never written into the repo's .git/config on the NAS.
+
+function getGitDeploys() { try { return loadConfig().gitDeploys || {}; } catch { return {}; } }
+
+function encToken(tok) {
+  if (!tok) return '';
+  try { if (safeStorage.isEncryptionAvailable()) return 'enc:' + safeStorage.encryptString(tok).toString('base64'); } catch {}
+  return 'raw:' + Buffer.from(tok, 'utf8').toString('base64'); // fallback if Keychain unavailable
+}
+function decToken(stored) {
+  if (!stored) return '';
+  try {
+    if (stored.startsWith('enc:')) return safeStorage.decryptString(Buffer.from(stored.slice(4), 'base64'));
+    if (stored.startsWith('raw:')) return Buffer.from(stored.slice(4), 'base64').toString('utf8');
+  } catch {}
+  return '';
+}
+
+// One shared read-only token for ALL apps, stored encrypted at the top level of config.
+function getGitToken() { try { return decToken(loadConfig().gitDeployToken || ''); } catch { return ''; } }
+
+// clean "github.com/owner/repo" (no scheme, no .git) — the token is added at run-time via $GT
+function gitBase(repoUrl) { return String(repoUrl || '').trim().replace(/^https?:\/\//, '').replace(/\.git$/, ''); }
+
+// Run a one-shot alpine/git container against the app folder; capture output + exit code.
+async function runGitContainer(host, port, folder, token, shellCmd) {
+  await pullImage(host, port, 'alpine/git');
+  const cr = await dockerRequest({ host, port, path: '/containers/create', method: 'POST', timeout: 40000 }, {
+    Image: 'alpine/git',
+    Entrypoint: ['/bin/sh', '-c'],
+    Cmd: [shellCmd],
+    Env: token ? ['GT=' + token] : [],
+    HostConfig: { Binds: [`${folder}:/git`], AutoRemove: false, NetworkMode: 'bridge' }
+  });
+  if (!cr.body || !cr.body.Id) throw new Error((cr.body && cr.body.message) || 'git container create failed');
+  const id = cr.body.Id;
+  try {
+    const sr = await dockerRequest({ host, port, path: `/containers/${id}/start`, method: 'POST', timeout: 40000 });
+    if (sr.status >= 400) throw new Error('git container failed to start (HTTP ' + sr.status + ')');
+    const wr = await dockerRequest({ host, port, path: `/containers/${id}/wait`, method: 'POST', timeout: 180000 });
+    const exitCode = (wr.body && typeof wr.body.StatusCode === 'number') ? wr.body.StatusCode : -1;
+    const output = await getContainerLogs(host, port, id).catch(() => '');
+    return { exitCode, output };
+  } finally {
+    dockerRequest({ host, port, path: `/containers/${id}?force=true`, method: 'DELETE' }).catch(() => {});
+  }
+}
+
+// Read the saved deploy config for a container key (token never returned raw).
+ipcMain.handle('gitdeploy:get', (_, { key }) => {
+  const d = getGitDeploys()[key];
+  const hasToken = !!loadConfig().gitDeployToken; // shared across all apps
+  return { configured: !!d, repoUrl: (d && d.repoUrl) || '', branch: (d && d.branch) || 'main', folder: (d && d.folder) || '', hasToken };
+});
+
+// Save/update deploy config. token is optional — omit to keep the existing one.
+ipcMain.handle('gitdeploy:set', (_, { key, repoUrl, branch, folder, token }) => {
+  try {
+    const c = loadConfig();
+    c.gitDeploys = c.gitDeploys || {};
+    const prev = c.gitDeploys[key] || {};
+    c.gitDeploys[key] = {
+      repoUrl: (repoUrl != null ? repoUrl : prev.repoUrl || '').trim(),
+      branch: (branch != null && branch !== '' ? branch : prev.branch || 'main').trim(),
+      folder: (folder != null ? folder : prev.folder || '').trim()
+    };
+    if (token != null && token !== '') c.gitDeployToken = encToken(String(token).trim()); // shared token — one for every app
+    saveConfig(c);
+    return { ok: true };
+  } catch (e) { return { ok: false, error: e.message }; }
+});
+
+ipcMain.handle('gitdeploy:forget', (_, { key }) => {
+  try { const c = loadConfig(); if (c.gitDeploys) { delete c.gitDeploys[key]; saveConfig(c); } return { ok: true }; }
+  catch (e) { return { ok: false, error: e.message }; }
+});
+
+// List recent commits for the rollback picker (fetches, changes nothing on disk).
+ipcMain.handle('gitdeploy:versions', async (_, { host, port, key }) => {
+  try {
+    const d = getGitDeploys()[key];
+    if (!d || !d.folder || !d.repoUrl) return { ok: false, error: 'Not configured' };
+    const branch = d.branch || 'main';
+    const cmd = [
+      'cd /git',
+      'git config --global --add safe.directory /git',
+      'git rev-parse --git-dir >/dev/null 2>&1 || git init -q',
+      `git fetch --tags "https://x-access-token:$GT@${gitBase(d.repoUrl)}.git" "${branch}"`,
+      'git --no-pager log FETCH_HEAD --oneline -20'
+    ].join(' && ');
+    const r = await runGitContainer(host, port, d.folder, getGitToken(), cmd);
+    if (r.exitCode !== 0) return { ok: false, error: (r.output || 'git failed').trim().split('\n').slice(-3).join('\n') };
+    const commits = r.output.split('\n').map(l => l.trim()).filter(Boolean)
+      .map(l => { const m = /^([0-9a-f]{7,40})\s+(.*)$/.exec(l); return m ? { sha: m[1], msg: m[2] } : null; })
+      .filter(Boolean);
+    return { ok: true, commits };
+  } catch (e) { return { ok: false, error: e.message }; }
+});
+
+// Deploy: pull to latest (no ref) or roll back to a commit (ref = sha), then restart.
+ipcMain.handle('gitdeploy:run', async (_, { host, port, key, ref, restartId }) => {
+  try {
+    const d = getGitDeploys()[key];
+    if (!d || !d.folder || !d.repoUrl) return { ok: false, error: 'Not configured — set the repo and folder first.' };
+    const branch = d.branch || 'main';
+    const resetTo = (ref && ref !== 'latest') ? ref : 'FETCH_HEAD';
+    const cmd = [
+      'cd /git',
+      'git config --global --add safe.directory /git',
+      'git rev-parse --git-dir >/dev/null 2>&1 || git init -q',
+      `git remote get-url origin >/dev/null 2>&1 || git remote add origin "${d.repoUrl}"`,
+      `git remote set-url origin "${d.repoUrl}"`,
+      `git fetch --tags "https://x-access-token:$GT@${gitBase(d.repoUrl)}.git" "${branch}"`,
+      `git reset --hard ${resetTo}`,
+      'echo "===PORTSIDE-DEPLOYED==="',
+      'git --no-pager log -1 --format="%h %s"'
+    ].join(' && ');
+    const r = await runGitContainer(host, port, d.folder, getGitToken(), cmd);
+    if (r.exitCode !== 0) {
+      return { ok: false, error: (r.output || 'git failed').trim().split('\n').slice(-4).join('\n'), output: r.output };
+    }
+    let restarted = false, restartError = null;
+    if (restartId) {
+      const rr = await dockerRequest({ host, port, path: `/containers/${restartId}/restart`, method: 'POST', timeout: 40000 });
+      if (rr.status >= 400) restartError = 'Files updated, but container restart failed (HTTP ' + rr.status + ')';
+      else restarted = true;
+    }
+    const deployed = ((r.output.split('===PORTSIDE-DEPLOYED===')[1]) || '').trim().split('\n').pop().trim();
+    return { ok: true, restarted, restartError, deployed, output: r.output };
+  } catch (e) { return { ok: false, error: e.message }; }
 });
 
 // ─── Window ───────────────────────────────────────────────────────────────────
