@@ -26,8 +26,8 @@ jobs:
       - name: Install dependencies
         run: npm install --no-audit --no-fund
 
-      - name: Build macOS app (unsigned)
-        run: npm run build
+      - name: Build macOS app (unsigned; --publish never so the release step below does the publishing)
+        run: npm run build -- --publish never
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: false   # personal app — skip Apple code signing
 

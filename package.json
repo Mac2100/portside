@@ -1,6 +1,6 @@
 {
   "name": "portside",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "Native Mac Docker manager for QNAP Container Station",
   "main": "main.js",
   "scripts": {
