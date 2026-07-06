@@ -744,7 +744,23 @@ ipcMain.handle('app:download-update', async (_e, { url, name }) => {
     if (!url) return { ok: false, error: 'That release has no downloadable installer attached.' };
     const dest = path.join(app.getPath('downloads'), name || 'Portside-update.dmg');
     await downloadFile(url, dest, (pct) => { if (mainWin && !mainWin.isDestroyed()) mainWin.webContents.send('app:download-progress', pct); });
-    shell.openPath(dest); // mounts the .dmg and opens its window so the user can drag Portside → Applications
+    await shell.openPath(dest); // mounts the .dmg and opens its window so the user can drag Portside → Applications
+    // macOS refuses to replace /Applications/Portside.app while it's running ("the item is in use"),
+    // so once the installer window is up, offer to quit. Quitting leaves the DMG's Finder window open,
+    // so the drag-to-Applications still works, then Mike reopens the new version.
+    setTimeout(async () => {
+      if (!mainWin || mainWin.isDestroyed()) return;
+      const { response } = await dialog.showMessageBox(mainWin, {
+        type: 'info',
+        buttons: ['Quit & Install', 'Not yet'],
+        defaultId: 0,
+        cancelId: 1,
+        title: 'Finish updating Portside',
+        message: 'Installer ready',
+        detail: 'In the window that just opened, drag Portside onto the Applications folder to replace the old version — then reopen Portside.\n\nPortside will quit now so the old version can be replaced.'
+      });
+      if (response === 0) { isQuitting = true; app.quit(); }
+    }, 1500);
     return { ok: true, path: dest };
   } catch (err) { return { ok: false, error: err.message }; }
 });
