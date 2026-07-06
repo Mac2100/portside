@@ -35,6 +35,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           name: ${{ github.ref_name }}
+          make_latest: true
           files: |
             dist/*.dmg
             dist/*-mac.zip

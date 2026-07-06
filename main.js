@@ -725,7 +725,7 @@ ipcMain.handle('app:check-update', async () => {
     if (r.status === 404) return { ok: true, current: app.getVersion(), latest: app.getVersion(), newer: false };
     if (r.status !== 200) return { ok: false, error: 'GitHub HTTP ' + r.status };
     const rel = JSON.parse(r.body);
-    const latest = (rel.tag_name || '').replace(/^v/, '');
+    const latest = (rel.tag_name || '').replace(/^\D+/, ''); // strip any leading non-digits (v1.2.3, v.1.2.3, etc.)
     const current = app.getVersion();
     const dmg = (rel.assets || []).find(a => /\.dmg$/i.test(a.name)) || (rel.assets || []).find(a => /\.zip$/i.test(a.name));
     return {
