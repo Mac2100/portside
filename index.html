@@ -888,6 +888,67 @@
     box-shadow: 0 4px 16px rgba(0,0,0,0.08), inset 0 1px 0 rgba(255,255,255,0.6);
   }
   :root[data-theme="light"] .insight-item { background: #ffffff; }
+
+  /* ── Container card grid — Liquid Glass (stage 1) ── */
+  .cgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(245px, 1fr)); gap: 14px; }
+  .gcard {
+    position: relative; border-radius: 15px; padding: 14px; cursor: pointer; overflow: hidden;
+    background: linear-gradient(160deg, rgba(255,255,255,0.085), rgba(255,255,255,0.04));
+    border: 1px solid rgba(255,255,255,0.12);
+    box-shadow: 0 8px 24px rgba(0,0,0,0.28), inset 0 1px 0 rgba(255,255,255,0.10);
+    backdrop-filter: blur(18px) saturate(1.1); -webkit-backdrop-filter: blur(18px) saturate(1.1);
+    transition: transform .12s ease, box-shadow .12s ease, border-color .12s ease;
+  }
+  .gcard:hover { transform: translateY(-2px); border-color: rgba(255,255,255,0.20);
+    box-shadow: 0 12px 30px rgba(0,0,0,0.34), inset 0 1px 0 rgba(255,255,255,0.12); }
+  .gcard::before { content: ""; position: absolute; top: 0; left: 0; right: 0; height: 2px; background: var(--tint, #58a6ff); opacity: .85; }
+  .gc-top { display: flex; align-items: center; gap: 10px; margin-bottom: 11px; }
+  .gc-ic { width: 38px; height: 38px; flex: 0 0 38px; border-radius: 11px; display: flex; align-items: center; justify-content: center;
+    font-size: 17px; font-weight: 600; color: #0c0e14; background: var(--tint, #58a6ff); box-shadow: 0 3px 10px -2px var(--tint, #58a6ff); }
+  .gc-name { font-size: 14px; font-weight: 600; line-height: 1.2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text); }
+  .gc-sub { font-size: 11px; color: var(--text-muted); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .gc-badge { margin-left: auto; flex: 0 0 auto; font-size: 11px; padding: 3px 9px; border-radius: 20px; display: inline-flex; align-items: center; gap: 5px; }
+  .gc-badge .d { width: 7px; height: 7px; border-radius: 50%; }
+  .gc-badge.run { background: rgba(63,185,80,0.16); color: #56d364; }
+  .gc-badge.run .d { background: #3fb950; box-shadow: 0 0 0 3px rgba(63,185,80,0.22); }
+  .gc-badge.off { background: rgba(255,255,255,0.08); color: var(--text-muted); }
+  .gc-badge.off .d { background: #7d8794; }
+  .gc-badge.warn { background: rgba(210,153,34,0.18); color: #e3b341; }
+  .gc-badge.warn .d { background: #d29922; }
+  .gc-spark { width: 100%; height: 42px; display: block; margin: 2px 0 10px; }
+  .gc-stats { display: flex; gap: 16px; margin-bottom: 12px; }
+  .gc-stats > div { min-width: 0; }
+  .gc-stats .k { font-size: 10px; color: var(--text-muted); letter-spacing: .04em; text-transform: uppercase; }
+  .gc-stats .v { font-size: 13px; font-weight: 600; display: block; margin-top: 1px; color: var(--text); }
+  .gc-act { display: flex; gap: 7px; }
+  .gc-act .btn { flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 5px; }
+  .gc-act .btn.ic { flex: 0 0 34px; }
+  :root[data-theme="light"] .gcard {
+    background: linear-gradient(160deg, rgba(255,255,255,0.92), rgba(255,255,255,0.74));
+    border-color: rgba(0,0,0,0.08); box-shadow: 0 6px 20px rgba(0,0,0,0.10), inset 0 1px 0 rgba(255,255,255,0.7); }
+  :root[data-theme="light"] .gc-ic { color: #ffffff; }
+  :root[data-theme="light"] .gc-badge.run { color: #1a7f37; }
+
+  /* ── Customize sheet + Command palette (stage 2) ── */
+  .swrow { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 4px; }
+  .sw { width: 30px; height: 30px; border-radius: 8px; cursor: pointer; border: 2px solid transparent; }
+  .sw.sel { border-color: var(--text); box-shadow: 0 0 0 2px var(--bg1); }
+  .sw.auto { display: flex; align-items: center; justify-content: center; font-size: 10px; color: var(--text-muted); background: var(--bg2); }
+  .ic-opt { width: 34px; height: 34px; border-radius: 9px; display: inline-flex; align-items: center; justify-content: center; font-size: 18px; cursor: pointer; background: var(--bg2); border: 2px solid transparent; }
+  .ic-opt.sel { border-color: var(--accent); }
+  .palette-trigger { display: flex; align-items: center; gap: 8px; width: calc(100% - 24px); margin: 8px 12px 6px; padding: 8px 10px; border-radius: 9px; background: rgba(255,255,255,0.05); border: 1px solid var(--border); color: var(--text-muted); font-size: 12px; cursor: pointer; text-align: left; }
+  .palette-trigger:hover { background: var(--bg2); color: var(--text); }
+  .palette-trigger span { margin-left: auto; font-size: 11px; opacity: .85; border: 1px solid var(--border); border-radius: 5px; padding: 1px 5px; }
+  #palette-modal { align-items: flex-start; }
+  .palette { width: 560px; max-width: 92vw; margin-top: 11vh; background: linear-gradient(180deg, #1d232e, #161b22); border: 1px solid rgba(255,255,255,0.12); border-radius: 14px; box-shadow: 0 20px 60px rgba(0,0,0,0.5); overflow: hidden; }
+  #palette-input { width: 100%; box-sizing: border-box; background: transparent; border: none; border-bottom: 1px solid var(--border); color: var(--text); font-size: 15px; padding: 14px 16px; outline: none; }
+  #palette-list { max-height: 52vh; overflow: auto; padding: 6px; }
+  .pcmd { display: flex; align-items: center; gap: 10px; padding: 9px 11px; border-radius: 9px; cursor: pointer; font-size: 13px; color: var(--text); }
+  .pcmd .pi { width: 22px; text-align: center; font-size: 14px; flex: 0 0 22px; color: var(--text-muted); }
+  .pcmd .psub { margin-left: auto; font-size: 11px; color: var(--text-muted); text-transform: capitalize; }
+  .pcmd.sel { background: rgba(88,166,255,0.16); }
+  .pcmd-empty { padding: 18px; text-align: center; color: var(--text-muted); font-size: 13px; }
+  :root[data-theme="light"] .palette { background: linear-gradient(180deg, #ffffff, #f7f9fb); }
 </style>
 <link rel="stylesheet" href="node_modules/@xterm/xterm/css/xterm.css">
 </head>
@@ -943,6 +1004,7 @@
 <div id="app">
   <!-- Sidebar -->
   <nav id="sidebar">
+    <button id="palette-open" class="palette-trigger">🔍 Search<span>⌘K</span></button>
     <div class="nav-section-label">Overview</div>
     <div class="nav-item active" data-page="dashboard">
       <span class="nav-icon">⊞</span> Dashboard
@@ -1506,6 +1568,42 @@
       <span id="gd-status" style="font-size:11px;color:var(--text-muted);margin-right:auto;align-self:center"></span>
       <button class="btn" id="gd-close-btn2">Close</button>
     </div>
+  </div>
+</div>
+
+<!-- Customize container card modal -->
+<div class="modal-overlay" id="cust-modal">
+  <div class="modal" style="width:460px">
+    <div class="modal-header">
+      <span style="font-size:15px">🎨</span>
+      <span class="modal-title" id="cust-title">Customize</span>
+      <button class="btn btn-icon" id="cust-close-btn">✕</button>
+    </div>
+    <div class="modal-body">
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px">
+        <div class="gc-ic" id="cust-preview" style="width:46px;height:46px;flex:0 0 46px;font-size:20px">A</div>
+        <div style="min-width:0"><div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.04em">Preview</div><div id="cust-preview-name" style="font-weight:600;font-size:15px">name</div></div>
+      </div>
+      <div class="deploy-label" style="margin-top:0">Nickname</div>
+      <input class="form-input" id="cust-nick" placeholder="Leave blank to use the real name" spellcheck="false" autocomplete="off">
+      <div class="deploy-label">Color</div>
+      <div class="swrow" id="cust-tints"></div>
+      <div class="deploy-label">Icon</div>
+      <div class="swrow" id="cust-icons"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn" id="cust-reset-btn" style="margin-right:auto">Use default</button>
+      <button class="btn" id="cust-cancel-btn">Cancel</button>
+      <button class="btn btn-primary" id="cust-save-btn">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- Command palette -->
+<div class="modal-overlay" id="palette-modal">
+  <div class="palette">
+    <input id="palette-input" placeholder="Search pages, actions, containers…" spellcheck="false" autocomplete="off">
+    <div id="palette-list"></div>
   </div>
 </div>
 
@@ -2463,11 +2561,112 @@ async function loadMiniStats(id) {
     memBar.style.width = Math.min(memPct, 100) + '%';
     memBar.className = 'mini-bar-fill' + (memPct > 85 ? ' critical' : memPct > 70 ? ' high' : '');
   }
+
+  // ── card grid: live values + rolling CPU sparkline ──
+  const gcpu = $(`gval-cpu-${short}`), gmem = $(`gval-mem-${short}`);
+  if (gcpu) gcpu.textContent = cpu.toFixed(1) + '%';
+  if (gmem) { const mb = memUsed / 1048576; gmem.textContent = mb >= 1024 ? (mb / 1024).toFixed(1) + ' GB' : Math.round(mb) + ' MB'; }
+  state.cpuHist = state.cpuHist || {};
+  const hist = (state.cpuHist[short] = state.cpuHist[short] || []);
+  hist.push(cpu); if (hist.length > 40) hist.shift();
+  drawSparkline(`gspk-${short}`, hist);
 }
 
-// ─── Container List page ──────────────────────────────────────────────────────
+// ─── Container List page — Liquid Glass card grid (stage 1) ───────────────────
+const GC_TINTS = ['#5DCAA5','#85B7EB','#7F77DD','#EF9F27','#97C459','#F0997B','#58A6FF','#BC8CFF'];
+function gcTint(s) { let h = 0; s = String(s || ''); for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0; return GC_TINTS[h % GC_TINTS.length]; }
+function gcMono(name) { const m = String(name || '').replace(/[^a-z0-9]/ig, ''); return (m.charAt(0) || '#').toUpperCase(); }
+
+function drawSparkline(svgId, values) {
+  const svg = document.getElementById(svgId); if (!svg) return;
+  const W = 220, H = 42, tint = svg.dataset.tint || '#58a6ff';
+  if (!values || values.length < 2) {
+    svg.innerHTML = `<line x1="0" y1="${H - 6}" x2="${W}" y2="${H - 6}" stroke="${tint}" stroke-opacity="0.4" stroke-width="2" stroke-dasharray="3 4"/>`;
+    return;
+  }
+  const max = Math.max(5, ...values) * 1.15, n = values.length;
+  const X = i => (i / (n - 1)) * W;
+  const Y = v => H - 4 - (Math.min(v, max) / max) * (H - 8);
+  const pts = values.map((v, i) => `${X(i).toFixed(1)},${Y(v).toFixed(1)}`).join(' ');
+  const area = `M0,${H} L` + values.map((v, i) => `${X(i).toFixed(1)},${Y(v).toFixed(1)}`).join(' L') + ` L${W},${H} Z`;
+  svg.innerHTML = `<path d="${area}" fill="${tint}" fill-opacity="0.15"/><polyline points="${pts}" fill="none" stroke="${tint}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`;
+}
+
 function renderContainersList() {
-  renderContainerTable('containers-list', state.containers);
+  renderContainerCards('containers-list', state.containers);
+}
+
+function renderContainerCards(targetId, containers) {
+  const el = $(targetId);
+  if (!containers || !containers.length) {
+    el.innerHTML = `<div class="empty-state"><div class="empty-icon">◫</div><div class="empty-title">No containers</div></div>`;
+    return;
+  }
+  const cards = containers.map(c => {
+    const name = sanitizeName(c.Names && c.Names[0]);
+    const short = c.Id.slice(0, 12);
+    const st = (c.State || '').toLowerCase();
+    const running = st === 'running';
+    const cust = (state.config.gcCustom || {})[name] || {};
+    const disp = cust.nickname || name;
+    const tint = cust.tint || gcTint(name);
+    const icon = cust.icon || gcMono(name);
+    const image = (c.Image || '').split('@')[0];
+    const hasPorts = (c.Ports || []).some(p => p.PublicPort);
+    const wport = hasPorts ? (c.Ports || []).filter(p => p.PublicPort).sort((a, b) => a.PublicPort - b.PublicPort)[0].PublicPort : '';
+    const badge = running ? `<span class="gc-badge run"><span class="d"></span>Running</span>`
+      : (st === 'restarting' || st === 'paused') ? `<span class="gc-badge warn"><span class="d"></span>${st.replace(/^\w/, m => m.toUpperCase())}</span>`
+      : `<span class="gc-badge off"><span class="d"></span>${(c.State || 'Stopped').replace(/^\w/, m => m.toUpperCase())}</span>`;
+    const status = (c.Status || '').replace(/\s*\(healthy\)/i, '');
+    const actions = running
+      ? `<button class="btn btn-warn" data-action="stop" data-id="${c.Id}">■ Stop</button>
+         <button class="btn" data-action="restart" data-id="${c.Id}">↻ Restart</button>
+         <button class="btn ic" data-action="logs" data-id="${c.Id}" title="Logs">≡</button>
+         <button class="btn ic" data-action="customize" title="Customize">🎨</button>`
+      : `<button class="btn btn-success" data-action="start" data-id="${c.Id}">▶ Start</button>
+         <button class="btn ic" data-action="logs" data-id="${c.Id}" title="Logs">≡</button>
+         <button class="btn ic" data-action="customize" title="Customize">🎨</button>`;
+    return `<div class="gcard" data-id="${c.Id}" data-name="${name}" style="--tint:${tint}">
+      <div class="gc-top">
+        <div class="gc-ic">${icon}</div>
+        <div style="min-width:0;flex:1">
+          <div class="gc-name" title="${name}">${disp}</div>
+          <div class="gc-sub">${image}</div>
+        </div>
+        ${badge}
+      </div>
+      <svg class="gc-spark" id="gspk-${short}" data-tint="${tint}" viewBox="0 0 220 42" preserveAspectRatio="none"></svg>
+      <div class="gc-stats">
+        <div><span class="k">CPU</span><span class="v" id="gval-cpu-${short}">${running ? '…' : '—'}</span></div>
+        <div><span class="k">MEM</span><span class="v" id="gval-mem-${short}">${running ? '…' : '—'}</span></div>
+        <div style="flex:1"><span class="k">Status</span><span class="v" style="font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:block" title="${status}">${status || '—'}</span></div>
+      </div>
+      <div class="gc-act">${actions}</div>
+    </div>`;
+  }).join('');
+  el.innerHTML = `<div class="cgrid">${cards}</div>`;
+
+  el.querySelectorAll('[data-action]').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const action = btn.dataset.action, id = btn.dataset.id;
+      const card = btn.closest('.gcard'); const rowName = card ? card.dataset.name : id.slice(0, 12);
+      if (action === 'logs') { openLogs(id, rowName); return; }
+      if (action === 'console') { openTerminalFor(id); return; }
+      if (action === 'web') { api.openUrl(`http://${state.config.host}:${btn.dataset.wport}`); return; }
+      if (action === 'customize') { openCustomize(rowName); return; }
+      const ok = await runContainerAction(id, action, rowName, btn);
+      if (ok) setTimeout(() => loadDashboard(), 1500);
+    });
+  });
+  el.querySelectorAll('.gcard').forEach(card =>
+    card.addEventListener('click', () => openDetail(card.dataset.id)));
+
+  containers.filter(c => (c.State || '').toLowerCase() === 'running').forEach(c => {
+    const short = c.Id.slice(0, 12);
+    drawSparkline(`gspk-${short}`, (state.cpuHist && state.cpuHist[short]) || []);
+    loadMiniStats(c.Id);
+  });
 }
 
 // ─── Detail Panel ─────────────────────────────────────────────────────────────
@@ -3211,6 +3410,115 @@ $('compose-file-input').addEventListener('change', (e) => {
   reader.readAsText(f);
   e.target.value = '';
 });
+
+// ─── Customize container card (nickname / tint / icon — saved locally) ────────
+const CUST_ICONS = ['📦','🌐','🗄','🗃','⚙️','🚀','✂️','🏷','🪧','🌱','🔒','📈','🧭','🎬','📮','🛠','🐘','🧱','📊','🔔'];
+let gcuName = null, gcuTint = null, gcuIcon = null;
+function updateCustPreview() {
+  const p = $('cust-preview');
+  const t = gcuTint || gcTint(gcuName);
+  p.style.background = t; p.style.boxShadow = '0 3px 10px -2px ' + t;
+  p.textContent = gcuIcon || gcMono(gcuName);
+  $('cust-preview-name').textContent = $('cust-nick').value.trim() || gcuName;
+}
+function openCustomize(name) {
+  gcuName = name;
+  const cust = (state.config.gcCustom || {})[name] || {};
+  gcuTint = cust.tint || null; gcuIcon = cust.icon || null;
+  $('cust-title').textContent = 'Customize — ' + name;
+  $('cust-nick').value = cust.nickname || '';
+  $('cust-tints').innerHTML = `<div class="sw auto${gcuTint ? '' : ' sel'}" data-tint="">Auto</div>` +
+    GC_TINTS.map(t => `<div class="sw${gcuTint === t ? ' sel' : ''}" data-tint="${t}" style="background:${t}"></div>`).join('');
+  $('cust-icons').innerHTML = `<div class="ic-opt${gcuIcon ? '' : ' sel'}" data-icon="">${gcMono(name)}</div>` +
+    CUST_ICONS.map(ic => `<div class="ic-opt${gcuIcon === ic ? ' sel' : ''}" data-icon="${ic}">${ic}</div>`).join('');
+  $('cust-tints').querySelectorAll('.sw').forEach(s => s.addEventListener('click', () => {
+    gcuTint = s.dataset.tint || null;
+    $('cust-tints').querySelectorAll('.sw').forEach(x => x.classList.remove('sel')); s.classList.add('sel'); updateCustPreview();
+  }));
+  $('cust-icons').querySelectorAll('.ic-opt').forEach(s => s.addEventListener('click', () => {
+    gcuIcon = s.dataset.icon || null;
+    $('cust-icons').querySelectorAll('.ic-opt').forEach(x => x.classList.remove('sel')); s.classList.add('sel'); updateCustPreview();
+  }));
+  updateCustPreview();
+  $('cust-modal').classList.add('open');
+  setTimeout(() => $('cust-nick').focus(), 30);
+}
+function closeCustomize() { $('cust-modal').classList.remove('open'); gcuName = null; }
+$('cust-nick').addEventListener('input', updateCustPreview);
+$('cust-close-btn').addEventListener('click', closeCustomize);
+$('cust-cancel-btn').addEventListener('click', closeCustomize);
+$('cust-modal').addEventListener('click', (e) => { if (e.target === $('cust-modal')) closeCustomize(); });
+$('cust-save-btn').addEventListener('click', () => {
+  const obj = {}; const nick = $('cust-nick').value.trim();
+  if (nick) obj.nickname = nick;
+  if (gcuTint) obj.tint = gcuTint;
+  if (gcuIcon) obj.icon = gcuIcon;
+  const all = { ...(state.config.gcCustom || {}) };
+  if (Object.keys(obj).length) all[gcuName] = obj; else delete all[gcuName];
+  saveCfg({ gcCustom: all });
+  closeCustomize(); renderContainersList(); toast('Customization saved', 'success');
+});
+$('cust-reset-btn').addEventListener('click', () => {
+  const all = { ...(state.config.gcCustom || {}) }; delete all[gcuName];
+  saveCfg({ gcCustom: all });
+  closeCustomize(); renderContainersList(); toast('Reset to default', 'info');
+});
+
+// ─── Command palette (⌘K) ─────────────────────────────────────────────────────
+function navTo(pg) { const it = [...document.querySelectorAll('.nav-item')].find(n => n.dataset.page === pg); if (it) it.click(); }
+let palItems = [], palSel = 0;
+function buildPaletteCommands() {
+  const cmds = [];
+  [['dashboard','⊞','Dashboard'],['events','☷','Activity'],['containers','◫','Containers'],['images','◱','Images'],['volumes','⬡','Volumes'],['networks','⬡','Networks'],['terminal','›','Terminal'],['files','◳','File Browser'],['settings','⚙','Settings']]
+    .forEach(([pg, ic, label]) => cmds.push({ icon: ic, label: 'Go to ' + label, sub: 'page', run: () => navTo(pg) }));
+  cmds.push({ icon: '🚀', label: 'Deploy a container', sub: 'action', run: () => { navTo('containers'); openDeploy(); } });
+  cmds.push({ icon: '⬇', label: 'Import from YAML', sub: 'action', run: () => { navTo('containers'); openComposeImport(); } });
+  cmds.push({ icon: '↻', label: 'Refresh', sub: 'action', run: () => loadDashboard() });
+  cmds.push({ icon: '⬆', label: 'Check for updates', sub: 'action', run: () => { navTo('settings'); checkAppUpdate(true); } });
+  (state.containers || []).forEach(c => {
+    const nm = sanitizeName(c.Names && c.Names[0]);
+    const disp = ((state.config.gcCustom || {})[nm] || {}).nickname || nm;
+    const st = (c.State || '').toLowerCase();
+    cmds.push({ icon: '◫', label: 'Open ' + disp, sub: c.State || 'container', run: () => { navTo('containers'); openDetail(c.Id); } });
+    if (st === 'running') cmds.push({ icon: '↻', label: 'Restart ' + disp, sub: 'container', run: async () => { if (await runContainerAction(c.Id, 'restart', disp)) setTimeout(loadDashboard, 1500); } });
+    else cmds.push({ icon: '▶', label: 'Start ' + disp, sub: 'container', run: async () => { if (await runContainerAction(c.Id, 'start', disp)) setTimeout(loadDashboard, 1500); } });
+  });
+  return cmds;
+}
+function renderPalette() {
+  const q = $('palette-input').value.trim().toLowerCase();
+  const all = buildPaletteCommands();
+  palItems = q ? all.filter(c => (c.label + ' ' + (c.sub || '')).toLowerCase().includes(q)) : all;
+  if (palSel >= palItems.length) palSel = 0;
+  const list = $('palette-list');
+  if (!palItems.length) { list.innerHTML = `<div class="pcmd-empty">No matches</div>`; return; }
+  list.innerHTML = palItems.map((c, i) =>
+    `<div class="pcmd${i === palSel ? ' sel' : ''}" data-i="${i}"><span class="pi">${c.icon}</span><span>${c.label}</span>${c.sub ? `<span class="psub">${c.sub}</span>` : ''}</div>`).join('');
+  list.querySelectorAll('.pcmd').forEach(el => {
+    el.addEventListener('mousemove', () => { if (palSel !== +el.dataset.i) { palSel = +el.dataset.i; highlightPalette(); } });
+    el.addEventListener('click', () => runPalette(+el.dataset.i));
+  });
+}
+function highlightPalette() { $('palette-list').querySelectorAll('.pcmd').forEach((el, i) => el.classList.toggle('sel', i === palSel)); }
+function scrollPalSel() { const el = $('palette-list').querySelector('.pcmd.sel'); if (el) el.scrollIntoView({ block: 'nearest' }); }
+function runPalette(i) { const c = palItems[i]; if (!c) return; closePalette(); c.run(); }
+function openPalette() { $('palette-input').value = ''; palSel = 0; renderPalette(); $('palette-modal').classList.add('open'); setTimeout(() => $('palette-input').focus(), 30); }
+function closePalette() { $('palette-modal').classList.remove('open'); }
+$('palette-open').addEventListener('click', openPalette);
+$('palette-input').addEventListener('input', renderPalette);
+$('palette-input').addEventListener('keydown', (e) => {
+  if (e.key === 'ArrowDown') { e.preventDefault(); palSel = Math.min(palSel + 1, palItems.length - 1); highlightPalette(); scrollPalSel(); }
+  else if (e.key === 'ArrowUp') { e.preventDefault(); palSel = Math.max(palSel - 1, 0); highlightPalette(); scrollPalSel(); }
+  else if (e.key === 'Enter') { e.preventDefault(); runPalette(palSel); }
+  else if (e.key === 'Escape') { e.preventDefault(); closePalette(); }
+});
+$('palette-modal').addEventListener('click', (e) => { if (e.target === $('palette-modal')) closePalette(); });
+document.addEventListener('keydown', (e) => {
+  if ((e.metaKey || e.ctrlKey) && (e.key === 'k' || e.key === 'K')) {
+    e.preventDefault();
+    $('palette-modal').classList.contains('open') ? closePalette() : openPalette();
+  }
+}, true);
 
 $('deploy-go-btn').addEventListener('click', async () => {
   const image = $('dep-image').value.trim();
