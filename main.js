@@ -3,6 +3,8 @@ const path = require('path');
 const https = require('https');
 const fs = require('fs');
 const { randomUUID, X509Certificate } = require('crypto');
+// Optional: YAML parser for compose import. Lazy so a missing install never crashes the app.
+let yaml = null; try { yaml = require('js-yaml'); } catch {}
 
 // ─── TLS Certs (user-imported in userData take priority over bundled) ────────
 function userCertsDir() { return path.join(app.getPath('userData'), 'certs'); }
@@ -369,6 +371,8 @@ ipcMain.handle('deploy:create', async (_, { host, port, spec }) => {
     const Binds = (spec.volumes || []).filter(v => v.host && v.cont).map(v => `${v.host}:${v.cont}`);
     const payload = {
       Image: spec.image,
+      Cmd: (Array.isArray(spec.command) && spec.command.length) ? spec.command : undefined,
+      Labels: (spec.labels && Object.keys(spec.labels).length) ? spec.labels : undefined,
       Env: (spec.env || []).filter(s => s && s.includes('=')),
       ExposedPorts: Object.keys(ExposedPorts).length ? ExposedPorts : undefined,
       HostConfig: {
@@ -391,6 +395,87 @@ ipcMain.handle('deploy:create', async (_, { host, port, spec }) => {
       return { ok: false, error: 'Created but failed to start: ' + ((sr.body && sr.body.message) || 'HTTP ' + sr.status), id: cr.body.Id };
     }
     return { ok: true, id: cr.body.Id };
+  } catch (e) { return { ok: false, error: e.message }; }
+});
+
+// ─── Compose (YAML) import → container specs ─────────────────────────────────
+// Turn a docker-compose file into the same specs deploy:create consumes, one per
+// service. This is NOT a full compose engine: it creates containers from services
+// (image / ports / volumes / environment / restart / command / labels / network).
+// build:, depends_on ordering, healthcheck, secrets, configs and profiles are ignored.
+function normalizeCompose(doc) {
+  const warnings = [];
+  const services = [];
+  const svc = doc && doc.services;
+  if (!svc || typeof svc !== 'object') throw new Error('No "services:" section found in the YAML.');
+  const toList = (v) => Array.isArray(v) ? v : (v == null ? [] : [v]);
+
+  for (const [name, s] of Object.entries(svc)) {
+    if (!s || typeof s !== 'object') { warnings.push(`Skipped "${name}" — not a service map.`); continue; }
+    if (s.build && !s.image) { warnings.push(`Skipped "${name}" — uses build:, which Portside can't do. Give it an image:.`); continue; }
+    if (!s.image) { warnings.push(`Skipped "${name}" — no image:.`); continue; }
+    if (s.depends_on) warnings.push(`"${name}" has depends_on — start order isn't guaranteed.`);
+
+    // ports: "h:c", "h:c/proto", "c", "ip:h:c", or long form {published,target,protocol}
+    const ports = [];
+    for (const p of toList(s.ports)) {
+      if (p && typeof p === 'object') { if (p.target) ports.push({ host: String(p.published || p.target), cont: String(p.target), proto: p.protocol || 'tcp' }); continue; }
+      let str = String(p), proto = 'tcp';
+      if (str.includes('/')) { const parts = str.split('/'); str = parts[0]; proto = parts[1] || 'tcp'; }
+      const seg = str.split(':');
+      let host, cont;
+      if (seg.length === 1) { cont = seg[0]; host = seg[0]; }
+      else if (seg.length === 2) { host = seg[0]; cont = seg[1]; }
+      else { host = seg[seg.length - 2]; cont = seg[seg.length - 1]; } // ip:host:cont → drop ip
+      ports.push({ host: String(host).trim(), cont: String(cont).trim(), proto });
+    }
+
+    // volumes: "src:dst[:ro]" (named or path); long form {source,target,read_only}
+    const volumes = [];
+    for (const v of toList(s.volumes)) {
+      if (v && typeof v === 'object') { if (v.source && v.target) volumes.push({ host: String(v.source), cont: String(v.target) + (v.read_only ? ':ro' : '') }); continue; }
+      const str = String(v), idx = str.indexOf(':');
+      if (idx === -1) { warnings.push(`"${name}": anonymous volume "${str}" skipped.`); continue; }
+      volumes.push({ host: str.slice(0, idx).trim(), cont: str.slice(idx + 1).trim() });
+    }
+
+    // environment: list ["K=V"] or map {K: V}
+    let env = [];
+    if (Array.isArray(s.environment)) env = s.environment.map(String);
+    else if (s.environment && typeof s.environment === 'object') env = Object.entries(s.environment).map(([k, val]) => `${k}=${val == null ? '' : val}`);
+
+    // command: array → Cmd; string → sh -c
+    let command;
+    if (Array.isArray(s.command)) command = s.command.map(String);
+    else if (typeof s.command === 'string' && s.command.trim()) command = ['sh', '-c', s.command.trim()];
+
+    // labels: list ["k=v"] or map {k: v}
+    let labels;
+    if (Array.isArray(s.labels)) { labels = {}; for (const l of s.labels) { const i = String(l).indexOf('='); if (i > 0) labels[String(l).slice(0, i)] = String(l).slice(i + 1); } }
+    else if (s.labels && typeof s.labels === 'object') { labels = {}; for (const [k, val] of Object.entries(s.labels)) labels[k] = String(val == null ? '' : val); }
+
+    // network: network_mode wins; else first named network (must already exist)
+    let network = s.network_mode || undefined;
+    if (!network && s.networks) { const n = Array.isArray(s.networks) ? s.networks[0] : Object.keys(s.networks)[0]; if (n) { network = String(n); warnings.push(`"${name}" → network "${network}" must already exist on the host.`); } }
+
+    const restart = s.restart
+      ? (['no', 'always', 'on-failure', 'unless-stopped'].includes(String(s.restart)) ? String(s.restart) : 'unless-stopped')
+      : undefined;
+
+    services.push({ name: s.container_name || name, image: String(s.image), ports, volumes, env, command, labels, restart, network });
+  }
+  if (!services.length) throw new Error('No usable services with an image: were found.');
+  return { services, warnings };
+}
+
+ipcMain.handle('compose:parse', (_, { yaml: text }) => {
+  try {
+    if (!yaml) return { ok: false, error: 'YAML support isn’t in this build yet — run "npm install" (adds js-yaml) and rebuild.' };
+    if (!text || !text.trim()) return { ok: false, error: 'Paste a docker-compose YAML first.' };
+    let doc;
+    try { doc = yaml.load(text); } catch (e) { return { ok: false, error: 'YAML parse error: ' + String(e.message || e).split('\n')[0] }; }
+    const { services, warnings } = normalizeCompose(doc);
+    return { ok: true, services, warnings };
   } catch (e) { return { ok: false, error: e.message }; }
 });
 
@@ -1272,6 +1357,24 @@ ipcMain.handle('gitdeploy:set', (_, { key, repoUrl, branch, folder, token }) => 
 
 ipcMain.handle('gitdeploy:forget', (_, { key }) => {
   try { const c = loadConfig(); if (c.gitDeploys) { delete c.gitDeploys[key]; saveConfig(c); } return { ok: true }; }
+  catch (e) { return { ok: false, error: e.message }; }
+});
+
+// ── Shared read-only GitHub token (managed in Settings, used by every app) ──
+ipcMain.handle('gitdeploy:token-state', () => {
+  return { hasToken: !!loadConfig().gitDeployToken };
+});
+ipcMain.handle('gitdeploy:token-set', (_, { token }) => {
+  try {
+    if (token == null || String(token).trim() === '') return { ok: false, error: 'Paste a token first' };
+    const c = loadConfig();
+    c.gitDeployToken = encToken(String(token).trim());
+    saveConfig(c);
+    return { ok: true };
+  } catch (e) { return { ok: false, error: e.message }; }
+});
+ipcMain.handle('gitdeploy:token-clear', () => {
+  try { const c = loadConfig(); delete c.gitDeployToken; saveConfig(c); return { ok: true }; }
   catch (e) { return { ok: false, error: e.message }; }
 });
 

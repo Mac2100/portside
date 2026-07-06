@@ -72,12 +72,18 @@ contextBridge.exposeInMainWorld('portside', {
   deploy: {
     create: (args) => ipcRenderer.invoke('deploy:create', args)
   },
+  compose: {
+    parse: (args) => ipcRenderer.invoke('compose:parse', args)
+  },
   gitdeploy: {
-    get:      (args) => ipcRenderer.invoke('gitdeploy:get', args),
-    set:      (args) => ipcRenderer.invoke('gitdeploy:set', args),
-    forget:   (args) => ipcRenderer.invoke('gitdeploy:forget', args),
-    versions: (args) => ipcRenderer.invoke('gitdeploy:versions', args),
-    run:      (args) => ipcRenderer.invoke('gitdeploy:run', args)
+    get:        (args) => ipcRenderer.invoke('gitdeploy:get', args),
+    set:        (args) => ipcRenderer.invoke('gitdeploy:set', args),
+    forget:     (args) => ipcRenderer.invoke('gitdeploy:forget', args),
+    versions:   (args) => ipcRenderer.invoke('gitdeploy:versions', args),
+    run:        (args) => ipcRenderer.invoke('gitdeploy:run', args),
+    tokenState: () => ipcRenderer.invoke('gitdeploy:token-state'),
+    tokenSet:   (args) => ipcRenderer.invoke('gitdeploy:token-set', args),
+    tokenClear: () => ipcRenderer.invoke('gitdeploy:token-clear')
   },
   logs: {
     start:  (args) => ipcRenderer.invoke('logs:start', args),

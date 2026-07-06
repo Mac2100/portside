@@ -496,8 +496,8 @@
     border: 1px solid var(--border);
     border-radius: 10px;
     padding: 20px;
-    margin-bottom: 16px;
-    max-width: 540px;
+    margin: 0 auto 16px;
+    max-width: 720px;
   }
   .settings-card-title {
     font-size: 14px;
@@ -1098,6 +1098,7 @@
         <div class="page-title">Containers</div>
         <div class="header-actions">
           <button class="btn btn-success" id="deploy-btn">+ Deploy</button>
+          <button class="btn" id="compose-btn">⬇ Import YAML</button>
           <button class="btn" id="containers-show-all-btn">Show All</button>
           <button class="btn btn-primary" id="containers-refresh-btn">↻ Refresh</button>
         </div>
@@ -1260,6 +1261,18 @@
             <button class="btn" id="cert-reset-btn" style="display:none">Revert to bundled</button>
           </div>
           <div class="form-hint" style="margin-top:8px">Select your ca.pem, cert.pem and key.pem from a new Container Station export — they're sorted automatically.</div>
+        </div>
+
+        <div class="settings-card">
+          <div class="settings-card-title">⬆ Git Deploy</div>
+          <div class="form-hint" style="margin-top:-4px;margin-bottom:12px">A read-only GitHub token lets Portside pull your app repos onto the NAS and restart the container. It's shared by every app and stored encrypted in your Mac Keychain — never written to the NAS.</div>
+          <div id="gitdeploy-token-state" style="margin-bottom:10px;font-size:12px"></div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <input class="form-input" id="gitdeploy-token" type="password" placeholder="github_pat_…" spellcheck="false" autocomplete="off" style="flex:1;min-width:220px">
+            <button class="btn btn-primary" id="gitdeploy-token-save">Save token</button>
+            <button class="btn" id="gitdeploy-token-clear" style="display:none">Remove</button>
+          </div>
+          <div class="form-hint" style="margin-top:8px">Create one at GitHub → Settings → Developer settings → Fine-grained tokens, with <b>Contents: Read-only</b> on your app repos.</div>
         </div>
 
         <div class="settings-card">
@@ -1433,6 +1446,32 @@
   </div>
 </div>
 
+<!-- Import YAML (compose) modal -->
+<div class="modal-overlay" id="compose-modal">
+  <div class="modal" style="width:720px">
+    <div class="modal-header">
+      <span style="font-size:15px">⬇</span>
+      <span class="modal-title">Import from YAML (docker-compose)</span>
+      <button class="btn btn-icon" id="compose-close-btn">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="deploy-label" style="margin-top:0">Paste a docker-compose.yml — or load a file</div>
+      <textarea class="form-input font-mono" id="compose-yaml" spellcheck="false" placeholder="services:&#10;  overseerr:&#10;    image: linuxserver/overseerr:latest&#10;    ports:&#10;      - 5055:5055&#10;    volumes:&#10;      - /share/appdata/overseerr:/config&#10;    restart: unless-stopped" style="height:210px;resize:vertical;white-space:pre;font-size:12px;line-height:1.5"></textarea>
+      <div style="display:flex;gap:8px;align-items:center;margin-top:10px;flex-wrap:wrap">
+        <button class="btn" id="compose-file-btn">Load file…</button>
+        <button class="btn btn-primary" id="compose-parse-btn">Preview</button>
+        <input type="file" id="compose-file-input" accept=".yml,.yaml,text/yaml" style="display:none">
+      </div>
+      <div id="compose-preview" style="margin-top:14px"></div>
+    </div>
+    <div class="modal-footer">
+      <span id="compose-status" style="font-size:11px;color:var(--text-muted);margin-right:auto;align-self:center"></span>
+      <button class="btn" id="compose-cancel-btn">Close</button>
+      <button class="btn btn-success" id="compose-create-btn" style="display:none">Create containers</button>
+    </div>
+  </div>
+</div>
+
 <!-- Git Deploy modal -->
 <div class="modal-overlay" id="gitdeploy-modal">
   <div class="modal" style="width:640px">
@@ -1454,8 +1493,7 @@
           <input class="form-input font-mono" id="gd-folder" placeholder="/share/Docker/.../app" spellcheck="false" style="font-size:11px">
         </div>
       </div>
-      <div class="deploy-label">Read-only token <span style="color:var(--text-muted);font-weight:400">· shared by every app</span> <span id="gd-token-state" style="color:var(--text-muted);font-weight:400"></span></div>
-      <input class="form-input" id="gd-token" type="password" placeholder="github_pat_… — paste once, used for all apps (blank = keep current)" spellcheck="false" autocomplete="off">
+      <div class="form-hint" id="gd-token-note" style="margin-top:10px"></div>
       <div style="display:flex;gap:8px;align-items:center;margin-top:14px;flex-wrap:wrap">
         <button class="btn btn-success" id="gd-deploy-btn">⬆ Pull latest &amp; restart</button>
         <button class="btn" id="gd-versions-btn">↻ Load versions…</button>
@@ -3014,20 +3052,23 @@ function openDeploy() {
 function closeDeploy() { $('deploy-modal').classList.remove('open'); }
 
 // ─── Git Deploy (pull the app folder from GitHub & restart, from within Portside) ─
-let gdKey = null, gdRestartId = null;
+let gdKey = null, gdRestartId = null, gdHasToken = false;
 
 async function openGitDeploy(id, name) {
   gdKey = name; gdRestartId = id;
   $('gd-title').textContent = 'Git Deploy — ' + name;
   const out = $('gd-output'); out.style.display = 'none'; out.textContent = '';
   $('gd-versions').style.display = 'none'; $('gd-rollback-btn').style.display = 'none';
-  $('gd-status').textContent = ''; $('gd-token').value = '';
+  $('gd-status').textContent = '';
 
   const saved = await api.gitdeploy.get({ key: name });
   $('gd-repo').value = (saved && saved.repoUrl) || '';
   $('gd-branch').value = (saved && saved.branch) || 'main';
   $('gd-folder').value = (saved && saved.folder) || '';
-  $('gd-token-state').textContent = (saved && saved.hasToken) ? '· saved ✓' : '· none yet';
+  gdHasToken = !!(saved && saved.hasToken);
+  $('gd-token-note').innerHTML = gdHasToken
+    ? 'GitHub token: <span style="color:#3fb950">saved ✓</span> — manage it in Settings → Git Deploy.'
+    : '⚠ No GitHub token yet — add one in <b>Settings → Git Deploy</b> before deploying.';
 
   if (!$('gd-folder').value) {
     try {
@@ -3046,14 +3087,13 @@ async function gdSave() {
     key: gdKey,
     repoUrl: $('gd-repo').value.trim(),
     branch: $('gd-branch').value.trim() || 'main',
-    folder: $('gd-folder').value.trim(),
-    token: $('gd-token').value
+    folder: $('gd-folder').value.trim()
   });
-  if ($('gd-token').value) { $('gd-token').value = ''; $('gd-token-state').textContent = '· saved ✓'; }
 }
 function gdValid() {
   if (!$('gd-repo').value.trim()) { toast('Enter the GitHub repo URL', 'error'); return false; }
   if (!$('gd-folder').value.trim()) { toast('Enter the app folder path', 'error'); return false; }
+  if (!gdHasToken) { toast('Add a GitHub token in Settings → Git Deploy first', 'error'); return false; }
   return true;
 }
 async function gdDeploy(ref) {
@@ -3096,6 +3136,81 @@ document.querySelectorAll('.kv-add').forEach(a =>
 $('deploy-btn').addEventListener('click', openDeploy);
 $('deploy-close-btn').addEventListener('click', closeDeploy);
 $('deploy-cancel-btn').addEventListener('click', closeDeploy);
+
+// ─── Import from YAML (docker-compose) ───────────────────────────────────────
+let composeSpecs = null;
+function openComposeImport() {
+  composeSpecs = null;
+  $('compose-yaml').value = '';
+  $('compose-preview').innerHTML = '';
+  $('compose-status').textContent = '';
+  $('compose-create-btn').style.display = 'none';
+  $('compose-modal').classList.add('open');
+}
+function closeComposeImport() { $('compose-modal').classList.remove('open'); composeSpecs = null; }
+
+function composePreview(services, warnings) {
+  const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const rows = services.map(s => {
+    const bits = [];
+    if (s.ports && s.ports.length) bits.push(s.ports.map(p => `${p.host}→${p.cont}/${p.proto}`).join(', '));
+    if (s.volumes && s.volumes.length) bits.push(`${s.volumes.length} vol`);
+    if (s.env && s.env.length) bits.push(`${s.env.length} env`);
+    if (s.command) bits.push('command');
+    if (s.restart) bits.push('restart: ' + s.restart);
+    if (s.network) bits.push('net: ' + s.network);
+    return `<div style="padding:8px 10px;border:1px solid var(--border);border-radius:8px;margin-bottom:6px">
+      <div style="font-weight:600">${esc(s.name)}</div>
+      <div style="font-size:12px;color:var(--text-muted);font-family:monospace">${esc(s.image)}</div>
+      ${bits.length ? `<div style="font-size:11px;color:var(--text-muted);margin-top:3px">${esc(bits.join('  ·  '))}</div>` : ''}
+    </div>`;
+  }).join('');
+  const warn = (warnings && warnings.length)
+    ? `<div style="margin-top:8px;font-size:11px;color:#d29922">${warnings.map(w => '⚠ ' + esc(w)).join('<br>')}</div>` : '';
+  $('compose-preview').innerHTML =
+    `<div style="font-size:12px;color:var(--text-muted);margin-bottom:8px">Will create ${services.length} container${services.length === 1 ? '' : 's'}:</div>${rows}${warn}`;
+}
+
+async function composeParse() {
+  $('compose-status').textContent = 'Parsing…';
+  const r = await api.compose.parse({ yaml: $('compose-yaml').value });
+  $('compose-status').textContent = '';
+  if (!r.ok) { $('compose-preview').innerHTML = ''; $('compose-create-btn').style.display = 'none'; composeSpecs = null; toast(r.error || 'Parse failed', 'error', 6000); return; }
+  composeSpecs = r.services;
+  composePreview(r.services, r.warnings);
+  $('compose-create-btn').style.display = '';
+}
+
+async function composeCreate() {
+  if (!composeSpecs || !composeSpecs.length) { toast('Preview a valid compose file first', 'error'); return; }
+  const btn = $('compose-create-btn');
+  btn.disabled = true;
+  let ok = 0, fail = 0;
+  for (const spec of composeSpecs) {
+    $('compose-status').textContent = 'Creating ' + spec.name + '…';
+    const r = await api.deploy.create({ ...state.config, spec });
+    if (r && r.ok) ok++; else { fail++; toast(`${spec.name}: ${(r && r.error) || 'failed'}`, 'error', 7000); }
+  }
+  btn.disabled = false;
+  $('compose-status').textContent = '';
+  toast(`Created ${ok} container${ok === 1 ? '' : 's'}${fail ? ` · ${fail} failed` : ''}`, fail ? 'error' : 'success', 5000);
+  if (ok) { closeComposeImport(); await loadDashboard(); showPage('containers'); renderContainersList(); }
+}
+
+$('compose-btn').addEventListener('click', openComposeImport);
+$('compose-close-btn').addEventListener('click', closeComposeImport);
+$('compose-cancel-btn').addEventListener('click', closeComposeImport);
+$('compose-parse-btn').addEventListener('click', composeParse);
+$('compose-create-btn').addEventListener('click', composeCreate);
+$('compose-file-btn').addEventListener('click', () => $('compose-file-input').click());
+$('compose-file-input').addEventListener('change', (e) => {
+  const f = e.target.files && e.target.files[0];
+  if (!f) return;
+  const reader = new FileReader();
+  reader.onload = () => { $('compose-yaml').value = reader.result || ''; composeParse(); };
+  reader.readAsText(f);
+  e.target.value = '';
+});
 
 $('deploy-go-btn').addEventListener('click', async () => {
   const image = $('dep-image').value.trim();
@@ -3259,6 +3374,7 @@ async function loadSettings() {
   $('setting-tray').checked = state.config.trayEnabled !== false;
   $('setting-alertbadge').checked = state.config.alertBadge !== false;
   refreshCertStatus();
+  refreshGitTokenState();
 }
 
 // Menu bar toggle
@@ -3320,6 +3436,35 @@ $('cert-reset-btn').addEventListener('click', async () => {
   await api.certs.reset({});
   toast('Reverted to bundled certificates', 'success');
   refreshCertStatus();
+});
+
+// Git Deploy token (shared by every app; managed here in Settings)
+async function refreshGitTokenState() {
+  try {
+    const r = await api.gitdeploy.tokenState();
+    const has = !!(r && r.hasToken);
+    $('gitdeploy-token-state').innerHTML = has
+      ? '<span style="color:#3fb950">✓ Token saved</span> — shared by every app.'
+      : '<span style="color:var(--text-muted)">No token saved yet.</span> Add one to enable Git Deploy.';
+    $('gitdeploy-token-clear').style.display = has ? '' : 'none';
+    $('gitdeploy-token').placeholder = has ? 'github_pat_… (leave blank to keep current)' : 'github_pat_…';
+  } catch {}
+}
+$('gitdeploy-token-save').addEventListener('click', async () => {
+  const tok = $('gitdeploy-token').value.trim();
+  if (!tok) { toast('Paste your github_pat_… token first', 'error'); return; }
+  const r = await api.gitdeploy.tokenSet({ token: tok });
+  if (!r || !r.ok) { toast((r && r.error) || 'Could not save token', 'error'); return; }
+  $('gitdeploy-token').value = '';
+  toast('GitHub token saved', 'success');
+  refreshGitTokenState();
+});
+$('gitdeploy-token-clear').addEventListener('click', async () => {
+  if (!confirm('Remove the saved GitHub token? Git Deploy will stop working until you add one again.')) return;
+  await api.gitdeploy.tokenClear();
+  $('gitdeploy-token').value = '';
+  toast('GitHub token removed', 'info');
+  refreshGitTokenState();
 });
 
 $('save-interval-btn').addEventListener('click', () => {
