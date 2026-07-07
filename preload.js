@@ -82,6 +82,7 @@ contextBridge.exposeInMainWorld('portside', {
     parse: (args) => ipcRenderer.invoke('compose:parse', args)
   },
   gitdeploy: {
+    list:       () => ipcRenderer.invoke('gitdeploy:list'),
     get:        (args) => ipcRenderer.invoke('gitdeploy:get', args),
     set:        (args) => ipcRenderer.invoke('gitdeploy:set', args),
     forget:     (args) => ipcRenderer.invoke('gitdeploy:forget', args),

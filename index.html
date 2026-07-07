@@ -982,8 +982,12 @@
     padding: 7px 10px; border: 1px solid var(--border); border-radius: 8px;
     margin-bottom: 6px; background: var(--bg0); font-size: 12.5px;
   }
-  .ghwatch-row .gw-repo { font-family: 'SF Mono', monospace; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .ghwatch-row .gw-tag { font-size: 11px; color: var(--text-muted); }
+  .ghwatch-row .gw-repo { font-family: 'SF Mono', monospace; flex: 1; min-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ghwatch-row .gw-tag { font-size: 11px; color: var(--text-muted); white-space: nowrap; }
+  .ghwatch-row { flex-wrap: wrap; }
+  .gw-auto { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; cursor: pointer; color: var(--text-muted); white-space: nowrap; }
+  .gw-auto input { accent-color: var(--accent); cursor: pointer; }
+  .gw-auto:has(input:checked) { color: var(--running); font-weight: 600; }
 
   /* ── Insights v2 ─────────────────────────────────────────────── */
   .ins-sec { margin-bottom: 26px; }
@@ -1465,6 +1469,10 @@
         <div class="settings-card">
           <div class="settings-card-title">🐳 Image Updates</div>
           <div class="form-hint" style="margin-top:-4px;margin-bottom:12px">Watches the registries your containers pull from (Docker Hub, GHCR, lscr.io, …) for <b>new versions of the images they run</b> — like Watchtower.</div>
+          <div class="switch-row" style="margin-bottom:12px">
+            <input type="checkbox" id="setting-upd-enabled" checked>
+            <label for="setting-upd-enabled" style="font-size:13px;cursor:pointer;font-weight:600">Enable image update checks</label>
+          </div>
           <div class="form-group">
             <label class="form-label">Check automatically</label>
             <div style="display:flex;gap:8px">
@@ -1492,11 +1500,16 @@
 
         <div class="settings-card">
           <div class="settings-card-title">🐙 GitHub Watch</div>
-          <div class="form-hint" style="margin-top:-4px;margin-bottom:12px">Not about images — this watches <b>source-code repos</b> for new commits and releases (e.g. the repos behind apps you build yourself). It only alerts you; nothing is deployed. Pushes show up on the next check — repos are checked on the same schedule as Image Updates. Private repos use your Git Deploy token automatically.</div>
+          <div class="form-hint" style="margin-top:-4px;margin-bottom:12px">Watches <b>source-code repos</b> for new commits and releases — the repos behind apps you build yourself. Link a repo to its container and you get a one-click <b>Deploy</b> on the alert; turn on <b>Auto</b> and a push is pulled onto the NAS and restarted with no clicks at all. Checked on the same schedule as Image Updates. Private repos use your Git Deploy token automatically.</div>
+          <div class="switch-row" style="margin-bottom:12px">
+            <input type="checkbox" id="setting-gh-enabled" checked>
+            <label for="setting-gh-enabled" style="font-size:13px;cursor:pointer;font-weight:600">Enable GitHub watch</label>
+          </div>
           <div id="ghwatch-list" style="margin-bottom:8px"></div>
-          <div style="display:flex;gap:6px">
-            <input class="form-input" id="ghwatch-repo" placeholder="owner/repo  e.g. Mac2100/SignPro" spellcheck="false" style="flex:1">
+          <div style="display:flex;gap:6px;flex-wrap:wrap">
+            <input class="form-input" id="ghwatch-repo" placeholder="owner/repo  e.g. Mac2100/SignPro" spellcheck="false" style="flex:1;min-width:200px">
             <button class="btn btn-primary" id="ghwatch-add-btn">Watch</button>
+            <button class="btn" id="ghwatch-import-btn" title="Watch every repo already configured in Git Deploy — linked to its container automatically">⤵ Import from Git Deploy</button>
             <button class="btn" id="ghwatch-check-btn" title="Check watched repos right now">Check now</button>
           </div>
         </div>
@@ -2121,6 +2134,7 @@ setTimeout(() => checkAppUpdate(false), 8000);
 setInterval(() => checkAppUpdate(false), 24 * 3600e3);
 
 async function checkUpdates(force, announce) {
+  if (state.config.updEnabled === false && !announce) return; // disabled — manual checks still allowed
   const btn = $('updates-btn');
   btn.disabled = true; btn.textContent = '⬆ Checking…';
   const r = await api.updates.check({ ...state.config, force });
@@ -2192,6 +2206,7 @@ function ghSeenFor(repo) {
 }
 
 async function checkGhReleases(announce) {
+  if (state.config.ghEnabled === false && !announce) return; // disabled — manual checks still allowed
   const watch = state.config.ghWatch || [];
   if (!watch.length) { state.ghNew = []; return; }
   const prevNew = new Set((state.ghNew || []).map(g => g.repo + '@' + g.what));
@@ -2219,6 +2234,7 @@ async function checkGhReleases(announce) {
   }
   if (typeof renderGhWatchList === 'function' && $('page-settings').classList.contains('active')) renderGhWatchList();
   renderInsights(state.lastPer || []);
+  ghAutoDeploy(found);
 }
 
 function markGhSeen(repo) {
@@ -2227,6 +2243,61 @@ function markGhSeen(repo) {
   saveCfg({ ghSeen: { ...(state.config.ghSeen || {}), [repo]: g.markSeen } });
   state.ghNew = state.ghNew.filter(x => x.repo !== repo);
   renderInsights(state.lastPer || []);
+}
+
+// ─── Repo ↔ container links (per-repo settings for GitHub Watch) ──────────────
+function ghCfgFor(repo) { return (state.config.ghWatchCfg || {})[repo] || {}; }
+function setGhCfg(repo, patch) {
+  const all = { ...(state.config.ghWatchCfg || {}) };
+  all[repo] = { ...(all[repo] || {}), ...patch };
+  saveCfg({ ghWatchCfg: all });
+}
+function repoFromUrl(url) {
+  const m = /github\.com\/([\w.-]+\/[\w.-]+?)(?:\.git)?(?:\/|$)/i.exec(String(url || ''));
+  return m ? m[1] : null;
+}
+
+// Deploy the linked container for a watched repo (runs the existing Git Deploy:
+// pull latest into the bind-mounted app folder, then restart the container).
+async function ghDeploy(repo, btn) {
+  const cfg = ghCfgFor(repo);
+  if (!cfg.container) { toast('Link this repo to a container first (Settings → GitHub Watch)', 'error', 6000); return false; }
+  const c = state.containers.find(x => sanitizeName(x.Names && x.Names[0]) === cfg.container);
+  if (btn) { btn.disabled = true; btn.textContent = 'Deploying…'; }
+  toast(`Deploying ${repo} → ${cfg.container}…`, 'info', 7000);
+  const r = await api.gitdeploy.run({ ...state.config, key: cfg.container, ref: 'latest', restartId: c ? c.Id : null });
+  if (btn) { btn.disabled = false; btn.textContent = '⬆ Deploy'; }
+  if (!r.ok) {
+    toast(`${cfg.container}: ${(r.error || 'deploy failed').split('\n')[0]}`, 'error', 9000);
+    try { new Notification('Portside', { body: `Deploy of ${cfg.container} failed — open Git Deploy for details` }); } catch {}
+    return false;
+  }
+  toast(`${cfg.container} deployed ${r.deployed || ''}${r.restarted ? ' · restarted' : ''} ✓`.trim(), 'success', 7000);
+  try { new Notification('Portside', { body: `${cfg.container} deployed from ${repo}${r.deployed ? ' (' + r.deployed.split(' ')[0] + ')' : ''}` }); } catch {}
+  markGhSeen(repo);
+  setTimeout(loadDashboard, 1500);
+  return true;
+}
+
+// Auto-deploy: pushes to repos with the Auto toggle get deployed hands-free.
+// Each new commit/release is attempted ONCE — failures wait for your input
+// (or the next push) instead of retrying every check.
+async function ghAutoDeploy(found) {
+  if (state._ghDeploying) return;
+  state._ghAutoTried = state._ghAutoTried || {};
+  const jobs = (found || []).filter(g => {
+    const cfg = ghCfgFor(g.repo);
+    return cfg.autoDeploy && cfg.container && state._ghAutoTried[g.repo] !== g.what;
+  });
+  if (!jobs.length) return;
+  state._ghDeploying = true;
+  try {
+    for (const g of jobs) {
+      state._ghAutoTried[g.repo] = g.what;
+      toast(`Auto-deploying ${g.repo} (${g.what})…`, 'info', 7000);
+      await ghDeploy(g.repo);
+    }
+  } finally { state._ghDeploying = false; }
 }
 
 // ─── Update check scheduling (registry + GitHub on the same clock) ────────────
@@ -2687,12 +2758,17 @@ function computeInsights(per) {
       actions: `<button class="btn btn-warn" data-act="upd" data-img="${escHtml(u.image)}">Update</button>` });
   });
 
-  (state.ghNew || []).forEach(g =>
+  (state.ghNew || []).forEach(g => {
+    const cfg = ghCfgFor(g.repo);
+    const base = g.kind === 'commit' ? `latest: ${(g.msg || '').slice(0, 70)}` : `${g.tag}${g.name && g.name !== g.tag ? ' · ' + g.name : ''}`;
     add({ key: 'gh-' + g.repo, section: 'updates', sev: 'warn', icon: '🐙',
       title: `${g.kind === 'commit' ? 'New commits' : 'New release'} — ${g.repo}`,
-      sub: g.kind === 'commit' ? `latest: ${(g.msg || '').slice(0, 70)}` : `${g.tag}${g.name && g.name !== g.tag ? ' · ' + g.name : ''}`,
+      sub: cfg.container ? `${base} · Deploy pulls it onto the NAS and restarts ${cfg.container}` : base,
       value: '',
-      actions: `<button class="btn" data-act="gh-view" data-url="${escHtml(g.url)}">View</button><button class="btn" data-act="gh-seen" data-repo="${escHtml(g.repo)}" title="Mark as seen">✓</button>` }));
+      chips: cfg.container ? [{ label: cfg.container, cls: '', cid: (state.containers.find(x => sanitizeName(x.Names && x.Names[0]) === cfg.container) || {}).Id }] : [],
+      actions: (cfg.container ? `<button class="btn btn-warn" data-act="gh-deploy" data-repo="${escHtml(g.repo)}">⬆ Deploy</button>` : '') +
+        `<button class="btn" data-act="gh-view" data-url="${escHtml(g.url)}">View</button><button class="btn" data-act="gh-seen" data-repo="${escHtml(g.repo)}" title="Mark as seen">✓</button>` });
+  });
 
   // — Housekeeping —
   const exited = state.containers.filter(c => (c.State || '').toLowerCase() === 'exited');
@@ -2856,6 +2932,7 @@ async function insightsAction(btn) {
   if (act === 'app-upd') { api.openUrl(state.appUpdate.url); return; }
   if (act === 'gh-view') { api.openUrl(btn.dataset.url); return; }
   if (act === 'gh-seen') { markGhSeen(btn.dataset.repo); return; }
+  if (act === 'gh-deploy') { await ghDeploy(btn.dataset.repo, btn); return; }
 
   if (act === 'upd') {
     const u = (state.updates?.results || []).find(x => x.image === btn.dataset.img);
@@ -4400,6 +4477,8 @@ async function loadSettings() {
 
 // ─── Container Updates settings ───────────────────────────────────────────────
 function renderUpdSettings() {
+  $('setting-upd-enabled').checked = state.config.updEnabled !== false;
+  $('setting-gh-enabled').checked = state.config.ghEnabled !== false;
   $('setting-upd-interval').value = String(state.config.updInterval !== undefined ? state.config.updInterval : 3600000);
   $('setting-upd-notify').checked = state.config.updNotify !== false;
 
@@ -4421,31 +4500,82 @@ function renderUpdSettings() {
 function renderGhWatchList() {
   const watch = state.config.ghWatch || [];
   const latest = state.ghLatest || {};
+  const containerNames = [...new Set(state.containers.map(c => sanitizeName(c.Names && c.Names[0])))].sort();
   $('ghwatch-list').innerHTML = watch.length
     ? watch.map(repo => {
         const l = latest[repo];
         const seen = ghSeenFor(repo);
+        const cfg = ghCfgFor(repo);
         const tag = (l && l.tag) || seen.tag || '';
         const sha = (l && l.commit && l.commit.shortSha) || (seen.sha || '').slice(0, 7);
         const bits = [tag, sha && '@' + sha].filter(Boolean).join(' ');
         const isNew = (state.ghNew || []).some(g => g.repo === repo);
+        const opts = ['<option value="">not linked</option>']
+          .concat(containerNames.map(n => `<option value="${escHtml(n)}"${cfg.container === n ? ' selected' : ''}>${escHtml(n)}</option>`))
+          .join('');
         return `<div class="ghwatch-row">
-          <span class="gw-repo">${escHtml(repo)}</span>
+          <span class="gw-repo" title="${escHtml(repo)}">${escHtml(repo)}</span>
           ${bits ? `<span class="gw-tag">${isNew ? '🆕 ' : ''}${escHtml(bits)}</span>` : ''}
+          <select class="form-input gw-link" data-gw-link="${escHtml(repo)}" title="Container to deploy when this repo changes" style="flex:0 0 150px;padding:4px 8px;font-size:12px">${opts}</select>
+          <label class="gw-auto" title="Auto-deploy on new commits/releases — no clicks needed"><input type="checkbox" data-gw-auto="${escHtml(repo)}"${cfg.autoDeploy ? ' checked' : ''}${cfg.container ? '' : ' disabled'}> Auto</label>
           <button class="btn btn-icon" data-gw-remove="${escHtml(repo)}" title="Stop watching">✕</button>
         </div>`;
       }).join('')
-    : '<div class="form-hint">Not watching any repos yet.</div>';
+    : '<div class="form-hint">Not watching any repos yet — add one below, or import everything you\'ve set up in Git Deploy.</div>';
+
+  $('ghwatch-list').querySelectorAll('[data-gw-link]').forEach(sel =>
+    sel.addEventListener('change', () => {
+      const repo = sel.dataset.gwLink;
+      setGhCfg(repo, { container: sel.value || null, ...(sel.value ? {} : { autoDeploy: false }) });
+      renderGhWatchList();
+      renderInsights(state.lastPer || []);
+    }));
+  $('ghwatch-list').querySelectorAll('[data-gw-auto]').forEach(cb =>
+    cb.addEventListener('change', () => {
+      setGhCfg(cb.dataset.gwAuto, { autoDeploy: cb.checked });
+      if (cb.checked) toast(`Auto-deploy on: pushes to ${cb.dataset.gwAuto} deploy ${ghCfgFor(cb.dataset.gwAuto).container} automatically`, 'info', 6000);
+    }));
   $('ghwatch-list').querySelectorAll('[data-gw-remove]').forEach(b =>
     b.addEventListener('click', () => {
       const repo = b.dataset.gwRemove;
       const seen2 = { ...(state.config.ghSeen || {}) }; delete seen2[repo];
-      saveCfg({ ghWatch: (state.config.ghWatch || []).filter(r => r !== repo), ghSeen: seen2 });
+      const cfg2 = { ...(state.config.ghWatchCfg || {}) }; delete cfg2[repo];
+      saveCfg({ ghWatch: (state.config.ghWatch || []).filter(r => r !== repo), ghSeen: seen2, ghWatchCfg: cfg2 });
       state.ghNew = (state.ghNew || []).filter(g => g.repo !== repo);
       renderGhWatchList();
       renderInsights(state.lastPer || []);
     }));
 }
+
+// Watch every repo already configured in Git Deploy, linked to its container
+$('ghwatch-import-btn').addEventListener('click', async () => {
+  const btn = $('ghwatch-import-btn');
+  btn.disabled = true; btn.textContent = 'Importing…';
+  try {
+    const deploys = await api.gitdeploy.list();
+    const entries = Object.entries(deploys || {});
+    if (!entries.length) { toast('No Git Deploy configs found — set up a repo on a container first (container → ⬆ Deploy)', 'info', 7000); return; }
+    let added = 0, linked = 0;
+    for (const [container, d] of entries) {
+      const repo = repoFromUrl(d.repoUrl);
+      if (!repo) continue;
+      const watch = state.config.ghWatch || [];
+      if (!watch.includes(repo)) {
+        const r = await api.github.latestRelease({ repo });
+        if (!r.ok) { toast(`${repo}: ${r.error}`, 'error', 6000); continue; }
+        saveCfg({
+          ghWatch: [...(state.config.ghWatch || []), r.repo],
+          ghSeen: { ...(state.config.ghSeen || {}), [r.repo]: { tag: r.tag || '', sha: (r.commit && r.commit.sha) || '' } }
+        });
+        state.ghLatest = { ...(state.ghLatest || {}), [r.repo]: r };
+        added++;
+      }
+      if (!ghCfgFor(repo).container) { setGhCfg(repo, { container }); linked++; }
+    }
+    toast(`Imported ${added} repo${added === 1 ? '' : 's'}${linked ? `, linked ${linked} to containers` : ''} — turn on Auto for hands-free deploys`, 'success', 8000);
+    renderGhWatchList();
+  } finally { btn.disabled = false; btn.textContent = '⤵ Import from Git Deploy'; }
+});
 
 $('setting-upd-interval').addEventListener('change', (e) => {
   saveCfg({ updInterval: +e.target.value });
@@ -4455,6 +4585,20 @@ $('setting-upd-interval').addEventListener('change', (e) => {
 
 $('setting-upd-notify').addEventListener('change', (e) => {
   saveCfg({ updNotify: e.target.checked });
+});
+
+$('setting-upd-enabled').addEventListener('change', (e) => {
+  saveCfg({ updEnabled: e.target.checked });
+  if (!e.target.checked) { state.updates = null; renderInsights(state.lastPer || []); }
+  else checkUpdates(true);
+  toast(e.target.checked ? 'Image update checks on' : 'Image update checks off — "Check now" still works manually', 'info', 4500);
+});
+
+$('setting-gh-enabled').addEventListener('change', (e) => {
+  saveCfg({ ghEnabled: e.target.checked });
+  if (!e.target.checked) { state.ghNew = []; renderInsights(state.lastPer || []); }
+  else checkGhReleases(true);
+  toast(e.target.checked ? 'GitHub watch on' : 'GitHub watch off — auto-deploy is paused too', 'info', 4500);
 });
 
 $('ghwatch-add-btn').addEventListener('click', async () => {

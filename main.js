@@ -1539,6 +1539,16 @@ async function runGitContainer(host, port, folder, token, shellCmd) {
   }
 }
 
+// List ALL saved Git Deploy configs (used to import them into GitHub Watch).
+ipcMain.handle('gitdeploy:list', () => {
+  const all = getGitDeploys();
+  const out = {};
+  for (const [key, d] of Object.entries(all)) {
+    if (d && d.repoUrl) out[key] = { repoUrl: d.repoUrl, branch: d.branch || 'main', folder: d.folder || '' };
+  }
+  return out;
+});
+
 // Read the saved deploy config for a container key (token never returned raw).
 ipcMain.handle('gitdeploy:get', (_, { key }) => {
   const d = getGitDeploys()[key];
