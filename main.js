@@ -917,11 +917,17 @@ function parseImageRef(image) {
   return { host, repo, tag };
 }
 
-async function remoteDigest(image) {
+// GET (not HEAD) so we also see the manifest LIST body. A multi-arch tag has
+// one digest for the list AND one per platform — depending on Docker version
+// and how the image was pulled, the local RepoDigests may store EITHER. Only
+// comparing the list digest caused eternal "update available" for some images
+// (and with auto-update on, an update-recreate loop). We now accept a match
+// against the list digest OR any platform digest.
+async function remoteManifest(image) {
   const { host, repo, tag } = parseImageRef(image);
   const url = `https://${host}/v2/${repo}/manifests/${tag}`;
   const accept = 'application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.v2+json, application/vnd.oci.image.manifest.v1+json';
-  let res = await regRequest('HEAD', url, { Accept: accept });
+  let res = await regRequest('GET', url, { Accept: accept });
   if (res.status === 401) {
     const wa = res.headers['www-authenticate'] || '';
     const realm = (/realm="([^"]+)"/.exec(wa) || [])[1];
@@ -931,10 +937,16 @@ async function remoteDigest(image) {
     const tok = JSON.parse(tr.body || '{}');
     const token = tok.token || tok.access_token;
     if (!token) throw new Error('Token fetch failed');
-    res = await regRequest('HEAD', url, { Accept: accept, Authorization: `Bearer ${token}` });
+    res = await regRequest('GET', url, { Accept: accept, Authorization: `Bearer ${token}` });
   }
   if (res.status !== 200) throw new Error('Registry HTTP ' + res.status);
-  return res.headers['docker-content-digest'] || null;
+  const digest = res.headers['docker-content-digest'] || null;
+  let platforms = [];
+  try {
+    const doc = JSON.parse(res.body);
+    if (Array.isArray(doc.manifests)) platforms = doc.manifests.map(m => m.digest).filter(Boolean);
+  } catch {}
+  return { digest, platforms };
 }
 
 ipcMain.handle('updates:check', async (_, { host, port, force }) => {
@@ -963,11 +975,14 @@ ipcMain.handle('updates:check', async (_, { host, port, force }) => {
         };
         try {
           const ir = await dockerRequest({ host, port, path: `/images/${encodeURIComponent(image)}/json` });
-          const digests = (ir.body && ir.body.RepoDigests) || [];
-          if (!digests.length || !digests[0].includes('@')) { entry.note = 'local build'; results.push(entry); return; }
-          const local = digests[0].split('@')[1];
-          const remote = await remoteDigest(image);
-          entry.updateAvailable = !!remote && remote !== local;
+          const locals = ((ir.body && ir.body.RepoDigests) || [])
+            .filter(d => d.includes('@')).map(d => d.split('@')[1]);
+          if (!locals.length) { entry.note = 'local build'; results.push(entry); return; }
+          const rm = await remoteManifest(image);
+          entry.remoteDigest = rm.digest || '';
+          const known = new Set([rm.digest, ...rm.platforms].filter(Boolean));
+          // Up to date if ANY locally recorded digest matches the list digest or any platform digest
+          entry.updateAvailable = known.size > 0 && !locals.some(d => known.has(d));
         } catch (e) {
           entry.error = e.message;
         }

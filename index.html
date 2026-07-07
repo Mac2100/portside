@@ -1463,8 +1463,8 @@
         </div>
 
         <div class="settings-card">
-          <div class="settings-card-title">🔄 Container Updates</div>
-          <div class="form-hint" style="margin-top:-4px;margin-bottom:12px">One check does everything: image registries (Docker Hub, GHCR, …) <b>and</b> your watched GitHub repos.</div>
+          <div class="settings-card-title">🐳 Image Updates</div>
+          <div class="form-hint" style="margin-top:-4px;margin-bottom:12px">Watches the registries your containers pull from (Docker Hub, GHCR, lscr.io, …) for <b>new versions of the images they run</b> — like Watchtower.</div>
           <div class="form-group">
             <label class="form-label">Check automatically</label>
             <div style="display:flex;gap:8px">
@@ -1483,17 +1483,21 @@
           </div>
           <div class="switch-row" style="margin-bottom:14px">
             <input type="checkbox" id="setting-upd-notify" checked>
-            <label for="setting-upd-notify" style="font-size:13px;cursor:pointer">Send a notification when something new is found</label>
+            <label for="setting-upd-notify" style="font-size:13px;cursor:pointer">Send a notification when something new is found (images &amp; GitHub)</label>
           </div>
           <div class="form-label" style="margin-bottom:4px">Auto-update containers</div>
-          <div class="form-hint" style="margin-top:0;margin-bottom:8px">Checked containers are pulled &amp; recreated automatically when a check finds a new image. Unchecked ones just show up under Insights → Updates.</div>
-          <div id="upd-auto-list" style="max-height:220px;overflow-y:auto;margin-bottom:14px"></div>
-          <div class="form-label" style="margin-bottom:4px">Watch GitHub repos</div>
-          <div class="form-hint" style="margin-top:0;margin-bottom:8px">Alerts on <b>new commits</b> to the default branch and on <b>new releases</b> — so a push to one of your app repos shows up on the next check. Private repos use your Git Deploy token automatically.</div>
+          <div class="form-hint" style="margin-top:0;margin-bottom:8px">Checked containers are pulled &amp; recreated automatically when a check finds a new image. Unchecked ones just show an entry under Insights → Updates.</div>
+          <div id="upd-auto-list" style="max-height:220px;overflow-y:auto"></div>
+        </div>
+
+        <div class="settings-card">
+          <div class="settings-card-title">🐙 GitHub Watch</div>
+          <div class="form-hint" style="margin-top:-4px;margin-bottom:12px">Not about images — this watches <b>source-code repos</b> for new commits and releases (e.g. the repos behind apps you build yourself). It only alerts you; nothing is deployed. Pushes show up on the next check — repos are checked on the same schedule as Image Updates. Private repos use your Git Deploy token automatically.</div>
           <div id="ghwatch-list" style="margin-bottom:8px"></div>
           <div style="display:flex;gap:6px">
             <input class="form-input" id="ghwatch-repo" placeholder="owner/repo  e.g. Mac2100/SignPro" spellcheck="false" style="flex:1">
             <button class="btn btn-primary" id="ghwatch-add-btn">Watch</button>
+            <button class="btn" id="ghwatch-check-btn" title="Check watched repos right now">Check now</button>
           </div>
         </div>
 
@@ -2144,19 +2148,26 @@ $('updates-btn').addEventListener('click', () => checkUpdates(true, true));
 async function autoApplyUpdates(avail) {
   if (state._autoUpdating) return;
   const auto = state.config.autoUpdate || {};
+  const alreadyApplied = state.config.updAutoApplied || {};
   const jobs = [];
   for (const u of avail) {
+    // Safety net: never auto-apply the SAME remote digest twice. If the check
+    // still reports an update after we already updated to this exact digest,
+    // something is off (e.g. registry quirk) — surface it, don't loop forever.
+    if (u.remoteDigest && alreadyApplied[u.image] === u.remoteDigest) continue;
     for (const c of u.containers) if (auto[c.name]) jobs.push({ u, c });
   }
   if (!jobs.length) return;
   state._autoUpdating = true;
   try {
     let applied = 0;
+    const appliedDigests = { ...alreadyApplied };
     for (const { u, c } of jobs) {
       toast(`Auto-updating ${c.name} (${u.shortName})…`, 'info', 7000);
       const r = await api.updates.apply({ ...state.config, id: c.id });
       if (r.ok) {
         applied++;
+        if (u.remoteDigest) appliedDigests[u.image] = u.remoteDigest;
         toast(`${c.name} auto-updated ✓`, 'success', 6000);
         try { new Notification('Portside', { body: `${c.name} was updated to the latest ${u.shortName} image` }); } catch {}
       } else {
@@ -2165,6 +2176,7 @@ async function autoApplyUpdates(avail) {
       }
     }
     if (applied) {
+      saveCfg({ updAutoApplied: appliedDigests });
       const rc = await api.updates.check({ ...state.config, force: true });
       if (rc.ok) state.updates = rc;
       loadDashboard();
@@ -2663,12 +2675,17 @@ function computeInsights(per) {
       title: `Portside v${state.appUpdate.latest} is out`, sub: `You're on v${state.appUpdate.current}`, value: '',
       actions: `<button class="btn btn-primary" data-act="app-upd">Get update</button>` });
 
-  ((state.updates && state.updates.results) || []).filter(u => u.updateAvailable).forEach(u =>
-    add({ key: 'img-' + u.image, section: 'updates', sev: 'warn', icon: '⬆️',
-      title: `Image update — ${u.shortName}`,
-      sub: `${u.image} · Update pulls the new image and recreates these containers (config kept, auto-rollback on failure):`, value: '',
+  ((state.updates && state.updates.results) || []).filter(u => u.updateAvailable).forEach(u => {
+    const stuck = u.remoteDigest && (state.config.updAutoApplied || {})[u.image] === u.remoteDigest;
+    add({ key: 'img-' + u.image, section: 'updates', sev: 'warn', icon: stuck ? '⚠️' : '⬆️',
+      title: stuck ? `${u.shortName} — updated, but the registry still reports a difference` : `Image update — ${u.shortName}`,
+      sub: stuck
+        ? `${u.image} · Auto-update already pulled this version. The digest still doesn't match the registry, so auto-update is paused for it. Update manually to retry, or ignore if the container works.`
+        : `${u.image} · Update pulls the new image and recreates these containers (config kept, auto-rollback on failure):`,
+      value: '',
       chips: u.containers.map(c => ({ label: c.name, cls: '', cid: c.id })),
-      actions: `<button class="btn btn-warn" data-act="upd" data-img="${escHtml(u.image)}">Update</button>` }));
+      actions: `<button class="btn btn-warn" data-act="upd" data-img="${escHtml(u.image)}">Update</button>` });
+  });
 
   (state.ghNew || []).forEach(g =>
     add({ key: 'gh-' + g.repo, section: 'updates', sev: 'warn', icon: '🐙',
@@ -2846,11 +2863,14 @@ async function insightsAction(btn) {
     if (!confirm(`Update ${u.shortName}?\n\nThis pulls the new image and recreates: ${u.containers.map(c => c.name).join(', ')}.\nConfig, ports and volumes are preserved. If anything fails, the old container is restored.`)) return;
     btn.disabled = true; btn.textContent = 'Updating…';
     toast(`Pulling ${u.image} — this can take a few minutes…`, 'info', 8000);
+    let okCount = 0;
     for (const c of u.containers) {
       const r = await api.updates.apply({ ...state.config, id: c.id });
-      if (r.ok) toast(`${c.name} updated ✓`, 'success', 5000);
+      if (r.ok) { okCount++; toast(`${c.name} updated ✓`, 'success', 5000); }
       else toast(`${c.name}: ${r.error}`, 'error', 8000);
     }
+    if (okCount && u.remoteDigest)
+      saveCfg({ updAutoApplied: { ...(state.config.updAutoApplied || {}), [u.image]: u.remoteDigest } });
     const rc = await api.updates.check({ ...state.config, force: true });
     if (rc.ok) state.updates = rc;
     loadDashboard();
@@ -4461,9 +4481,20 @@ $('ghwatch-add-btn').addEventListener('click', async () => {
 $('upd-check-now-btn').addEventListener('click', async () => {
   const btn = $('upd-check-now-btn');
   btn.disabled = true; btn.textContent = 'Checking…';
-  await Promise.all([checkUpdates(true, true), checkGhReleases(true)]);
+  await checkUpdates(true, true);
+  btn.disabled = false; btn.textContent = 'Check now';
+});
+
+$('ghwatch-check-btn').addEventListener('click', async () => {
+  const btn = $('ghwatch-check-btn');
+  const n = (state.config.ghWatch || []).length;
+  if (!n) { toast('Add a repo to watch first', 'info'); return; }
+  btn.disabled = true; btn.textContent = 'Checking…';
+  await checkGhReleases(true);
   btn.disabled = false; btn.textContent = 'Check now';
   renderGhWatchList();
+  const found = (state.ghNew || []).length;
+  toast(found ? `${found} repo${found > 1 ? 's have' : ' has'} something new — see Insights` : 'Watched repos: nothing new ✓', found ? 'info' : 'success');
 });
 
 // Menu bar toggle
