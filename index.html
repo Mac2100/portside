@@ -1025,7 +1025,20 @@
   .ins-sub { font-size: 12px; color: var(--text-muted); margin-top: 2px; line-height: 1.45; }
   .ins-value { font-size: 15px; font-weight: 700; flex-shrink: 0; font-variant-numeric: tabular-nums; }
   .ins-act { flex-shrink: 0; display: flex; gap: 6px; }
+  .ins-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+  .chip {
+    font-size: 11.5px; font-weight: 600; padding: 3px 10px; border-radius: 12px;
+    background: var(--bg2); border: 1px solid var(--border); color: var(--text);
+  }
+  .chip.clk { cursor: pointer; }
+  .chip.clk:hover { border-color: var(--accent); color: var(--accent); }
+  .chip.ok { background: rgba(63,185,80,0.12); border-color: rgba(63,185,80,0.4); color: #56d364; }
+  .chip.warnc { background: rgba(210,153,34,0.12); border-color: rgba(210,153,34,0.45); color: #e3b341; }
+  .chip.bad { background: rgba(248,81,73,0.12); border-color: rgba(248,81,73,0.45); color: #ff7b72; }
   :root[data-theme="light"] .ins-item { background: #ffffff; }
+  :root[data-theme="light"] .chip.ok { color: #1a7f37; }
+  :root[data-theme="light"] .chip.warnc { color: #9a6700; }
+  :root[data-theme="light"] .chip.bad { color: #cf222e; }
 </style>
 <link rel="stylesheet" href="node_modules/@xterm/xterm/css/xterm.css">
 </head>
@@ -1255,6 +1268,7 @@
             <button class="seg-btn" data-cview="list" title="Compact list">☰ List</button>
           </div>
           <button class="btn btn-success" id="deploy-btn">+ Deploy</button>
+          <button class="btn" id="group-new-btn" title="Create a group and pick its containers">＋ Group</button>
           <button class="btn" id="compose-btn">⬇ Import YAML</button>
           <button class="btn" id="containers-show-all-btn">Running Only</button>
           <button class="btn btn-primary" id="containers-refresh-btn">↻ Refresh</button>
@@ -1684,6 +1698,29 @@
       <span id="edit-status" style="font-size:11px;color:var(--text-muted);margin-right:auto;align-self:center"></span>
       <button class="btn" id="edit-cancel-btn">Cancel</button>
       <button class="btn btn-primary" id="edit-save-btn">Recreate container</button>
+    </div>
+  </div>
+</div>
+
+<!-- Group create/edit modal -->
+<div class="modal-overlay" id="group-modal">
+  <div class="modal" style="width:480px">
+    <div class="modal-header">
+      <span style="font-size:15px">🗂</span>
+      <span class="modal-title" id="group-title">New group</span>
+      <button class="btn btn-icon" id="group-close-btn">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="deploy-label" style="margin-top:0">Group name</div>
+      <input class="form-input" id="group-name" placeholder="e.g. Media, SaaS, Tools" spellcheck="false" autocomplete="off">
+      <div class="deploy-label">Containers in this group</div>
+      <div class="form-hint" style="margin-top:0;margin-bottom:8px">Checking a container moves it here (a container can only be in one group).</div>
+      <div id="group-members" style="max-height:300px;overflow-y:auto"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-danger" id="group-delete-btn" style="margin-right:auto;display:none">Dissolve group</button>
+      <button class="btn" id="group-cancel-btn">Cancel</button>
+      <button class="btn btn-primary" id="group-save-btn">Save group</button>
     </div>
   </div>
 </div>
@@ -2629,7 +2666,8 @@ function computeInsights(per) {
   ((state.updates && state.updates.results) || []).filter(u => u.updateAvailable).forEach(u =>
     add({ key: 'img-' + u.image, section: 'updates', sev: 'warn', icon: '⬆️',
       title: `Image update — ${u.shortName}`,
-      sub: `${u.image} · used by ${u.containers.map(c => c.name).join(', ')}`, value: '',
+      sub: `${u.image} · Update pulls the new image and recreates these containers (config kept, auto-rollback on failure):`, value: '',
+      chips: u.containers.map(c => ({ label: c.name, cls: '', cid: c.id })),
       actions: `<button class="btn btn-warn" data-act="upd" data-img="${escHtml(u.image)}">Update</button>` }));
 
   (state.ghNew || []).forEach(g =>
@@ -2644,7 +2682,8 @@ function computeInsights(per) {
   if (exited.length)
     add({ key: 'stopped', section: 'housekeeping', sev: 'info', icon: '💤',
       title: `${exited.length} stopped container${exited.length > 1 ? 's' : ''}`,
-      sub: exited.slice(0, 4).map(name1).join(', ') + (exited.length > 4 ? '…' : ''), value: '',
+      sub: 'Click a name to open it · "Remove all" deletes every stopped container (data in volumes/bind mounts is kept)', value: '',
+      chips: exited.map(c => ({ label: name1(c), cls: '', cid: c.Id })),
       actions: `<button class="btn btn-warn" data-act="prune-stopped">Remove all</button>` });
 
   if (state.df) {
@@ -2652,7 +2691,8 @@ function computeInsights(per) {
     if (dangling.length) {
       const reclaim = dangling.reduce((a, i) => a + (i.Size || 0), 0);
       add({ key: 'dangling', section: 'housekeeping', sev: 'warn', icon: '🧹',
-        title: `${dangling.length} dangling image${dangling.length > 1 ? 's' : ''}`, sub: `~${fmt(reclaim)} reclaimable`, value: '',
+        title: `${dangling.length} dangling image${dangling.length > 1 ? 's' : ''} — ~${fmt(reclaim)} reclaimable`,
+        sub: 'Untagged leftover layers from old image versions. Nothing uses them — safe to prune.', value: '',
         actions: `<button class="btn btn-warn" data-act="prune-imgs">Prune</button>` });
     }
     const volsArr = state.df.Volumes || [];
@@ -2667,17 +2707,32 @@ function computeInsights(per) {
     const layers = state.df.LayersSize || 0;
     const vols = volsArr.reduce((a, v) => a + ((v.UsageData && v.UsageData.Size > 0) ? v.UsageData.Size : 0), 0);
     add({ key: 'storage', section: 'status', sev: 'none', icon: '💾',
-      title: 'Storage', sub: `Images ${fmt(layers)} · Volumes ${fmt(vols)}`, value: '' });
+      title: 'Docker storage on the NAS', sub: 'What Docker itself is using — via /system/df', value: '',
+      chips: [
+        { label: `Images ${fmt(layers)}`, cls: '' },
+        { label: `Volumes ${fmt(vols)}`, cls: '' },
+        { label: `${(state.df.Containers || []).length} containers`, cls: '' }
+      ] });
   }
 
-  // — Status —
+  // — Status: per-container health checks (only containers that DEFINE a Docker
+  //   HEALTHCHECK report here — the rest have nothing to check) —
   const withHealth = inspects.filter(([, x]) => x.State && x.State.Health);
   if (withHealth.length) {
-    const healthy = withHealth.filter(([, x]) => x.State.Health.Status === 'healthy').length;
-    const starting = withHealth.filter(([, x]) => x.State.Health.Status === 'starting').length;
-    add({ key: 'health-summary', section: 'status', sev: healthy === withHealth.length ? 'good' : 'none', icon: '🩺',
-      title: `Health checks: ${healthy}/${withHealth.length} passing`,
-      sub: starting ? `${starting} still starting up` : 'All defined health checks reporting', value: '' });
+    const stat = ([, x]) => x.State.Health.Status;
+    const healthy = withHealth.filter(e => stat(e) === 'healthy').length;
+    const chipCls = { healthy: 'ok', starting: 'warnc', unhealthy: 'bad' };
+    const chipMark = { healthy: '✓', starting: '⏳', unhealthy: '✕' };
+    add({ key: 'health-summary', section: 'status',
+      sev: healthy === withHealth.length ? 'good' : 'warn', icon: '🩺',
+      title: `Health checks — ${healthy}/${withHealth.length} passing`,
+      sub: `These ${withHealth.length} containers define a Docker HEALTHCHECK (the app pings itself and reports back). Your other containers don't define one, so there's nothing to check. Click a name to inspect.`,
+      value: '',
+      chips: withHealth.map(([id, x]) => {
+        const c = state.containers.find(k => k.Id === id);
+        const s = x.State.Health.Status;
+        return { label: `${c ? name1(c) : id.slice(0, 12)} ${chipMark[s] || '·'}`, cls: chipCls[s] || '', cid: id };
+      }) });
   }
 
   return items;
@@ -2739,7 +2794,7 @@ function renderInsights(per) {
         node = document.createElement('div');
         node.dataset.key = i.key;
         node.innerHTML = `<div class="ins-icon"></div>
-          <div class="ins-body"><div class="ins-title"></div><div class="ins-sub"></div></div>
+          <div class="ins-body"><div class="ins-title"></div><div class="ins-sub"></div><div class="ins-chips"></div></div>
           <div class="ins-value"></div><div class="ins-act"></div>`;
         body.appendChild(node);
       }
@@ -2751,6 +2806,10 @@ function renderInsights(per) {
       set('.ins-title', i.title);
       set('.ins-sub', i.sub || '');
       set('.ins-value', i.value || '');
+      const chipsEl = node.querySelector('.ins-chips');
+      const ch = (i.chips || []).map(c =>
+        `<span class="chip ${c.cls || ''}${c.cid ? ' clk' : ''}"${c.cid ? ` data-cid="${c.cid}"` : ''}>${escHtml(c.label)}</span>`).join('');
+      if (chipsEl.dataset.h !== ch) { chipsEl.dataset.h = ch; chipsEl.innerHTML = ch; chipsEl.style.display = ch ? '' : 'none'; }
       const act = node.querySelector('.ins-act');
       const ah = i.actions || '';
       if (act.dataset.h !== ah) { act.dataset.h = ah; act.innerHTML = ah; }
@@ -2768,6 +2827,8 @@ function renderInsights(per) {
 $('insights-list').addEventListener('click', async (e) => {
   const btn = e.target.closest('[data-act]');
   if (btn) { e.stopPropagation(); await insightsAction(btn); return; }
+  const chip = e.target.closest('.chip[data-cid]');
+  if (chip) { openDetail(chip.dataset.cid); return; }
   const item = e.target.closest('.ins-item[data-cid]');
   if (item) openDetail(item.dataset.cid);
 });
@@ -3025,15 +3086,7 @@ function renderContainersList() {
   el.querySelectorAll('[data-gh-rename]').forEach(b =>
     b.addEventListener('click', (e) => {
       e.stopPropagation();
-      const g = names[+b.dataset.ghRename];
-      const nn = (prompt(`Rename group "${g}" to:`, g) || '').trim();
-      if (!nn || nn === g) return;
-      const map = { ...(state.config.gcGroups || {}) };
-      for (const k of Object.keys(map)) if (map[k] === g) map[k] = nn;
-      if (state.collapsedGroups[g]) { state.collapsedGroups[nn] = true; delete state.collapsedGroups[g]; }
-      saveCfg({ gcGroups: map });
-      renderContainersList();
-      toast(`Group renamed to "${nn}"`, 'success');
+      openGroupModal(names[+b.dataset.ghRename]); // Electron has no prompt() — use the modal
     }));
   el.querySelectorAll('[data-gh-dissolve]').forEach(b =>
     b.addEventListener('click', (e) => {
@@ -3056,6 +3109,66 @@ document.querySelectorAll('#cview-picker .seg-btn').forEach(b =>
     saveCfg({ containerView: state.containerView });
     renderContainersList();
   }));
+
+// ─── Group create/edit modal ──────────────────────────────────────────────────
+let groupOrigName = null;
+
+function openGroupModal(existing) {
+  groupOrigName = existing || null;
+  $('group-title').textContent = existing ? `Edit group — ${existing}` : 'New group';
+  $('group-name').value = existing || '';
+  $('group-delete-btn').style.display = existing ? '' : 'none';
+
+  const map = state.config.gcGroups || {};
+  const names = [...new Set(state.containers.map(c => sanitizeName(c.Names && c.Names[0])))].sort();
+  $('group-members').innerHTML = names.length
+    ? names.map(n => {
+        const inThis = existing && map[n] === existing;
+        const elsewhere = map[n] && map[n] !== existing ? ` <span class="text-muted" style="font-size:11px">— currently in ${escHtml(map[n])}</span>` : '';
+        return `<label class="upd-auto-row"><input type="checkbox" data-gm="${escHtml(n)}"${inThis ? ' checked' : ''}> ${escHtml(n)}${elsewhere}</label>`;
+      }).join('')
+    : '<div class="form-hint">No containers found — connect to a host first.</div>';
+
+  $('group-modal').classList.add('open');
+  setTimeout(() => $('group-name').focus(), 30);
+}
+function closeGroupModal() { $('group-modal').classList.remove('open'); groupOrigName = null; }
+
+$('group-new-btn').addEventListener('click', () => openGroupModal(null));
+$('group-close-btn').addEventListener('click', closeGroupModal);
+$('group-cancel-btn').addEventListener('click', closeGroupModal);
+$('group-modal').addEventListener('click', (e) => { if (e.target === $('group-modal')) closeGroupModal(); });
+
+$('group-save-btn').addEventListener('click', () => {
+  const name = $('group-name').value.trim();
+  if (!name) { toast('Give the group a name', 'error'); return; }
+  if (name === 'Ungrouped') { toast('"Ungrouped" is reserved', 'error'); return; }
+  const map = { ...(state.config.gcGroups || {}) };
+  $('group-members').querySelectorAll('[data-gm]').forEach(cb => {
+    const n = cb.dataset.gm;
+    if (cb.checked) map[n] = name;
+    else if (map[n] === name || (groupOrigName && map[n] === groupOrigName)) delete map[n];
+  });
+  if (groupOrigName && groupOrigName !== name && state.collapsedGroups[groupOrigName]) {
+    state.collapsedGroups[name] = true; delete state.collapsedGroups[groupOrigName];
+  }
+  saveCfg({ gcGroups: map });
+  closeGroupModal();
+  renderContainersList();
+  toast(`Group "${name}" saved`, 'success');
+});
+
+$('group-delete-btn').addEventListener('click', () => {
+  if (!groupOrigName) return;
+  if (!confirm(`Dissolve group "${groupOrigName}"?\n\nIts containers are untouched — they just become ungrouped.`)) return;
+  const map = { ...(state.config.gcGroups || {}) };
+  for (const k of Object.keys(map)) if (map[k] === groupOrigName) delete map[k];
+  delete state.collapsedGroups[groupOrigName];
+  saveCfg({ gcGroups: map });
+  closeGroupModal();
+  renderContainersList();
+  toast('Group dissolved', 'info');
+});
 
 function renderContainerCards(targetId, containers) {
   const el = $(targetId);
@@ -3169,6 +3282,7 @@ async function openDetail(id) {
     acts.innerHTML = `<button class="btn btn-success" data-action="start" data-id="${id}">▶ Start</button>`;
   }
   acts.innerHTML += `<button class="btn" id="detail-edit-btn" title="Edit ports, volumes, env, image…">✎ Edit</button>`;
+  acts.innerHTML += `<button class="btn" id="detail-customize-btn" title="Nickname, color, icon & group">🎨 Customize</button>`;
   acts.innerHTML += `<button class="btn btn-danger" data-action="remove" data-id="${id}">✕ Remove</button>`;
   acts.innerHTML += `<button class="btn" id="detail-gitdeploy-btn" title="Pull latest from GitHub & restart">⬆ Deploy</button>`;
 
@@ -3187,6 +3301,8 @@ async function openDetail(id) {
   if (gd) gd.onclick = () => openGitDeploy(id, name);
   const eb = $('detail-edit-btn');
   if (eb) eb.onclick = () => openEditContainer(id);
+  const cb = $('detail-customize-btn');
+  if (cb) cb.onclick = () => openCustomize(name);
 
   // Info section
   const ports = (c.Ports || []).filter(p => p.PublicPort).map(p => `${p.IP || '0.0.0.0'}:${p.PublicPort} → ${p.PrivatePort}/${p.Type || 'tcp'}`);
