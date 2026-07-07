@@ -675,8 +675,8 @@ function getContainerStats(host, port, id) {
   });
 }
 
-// Get container logs
-function getContainerLogs(host, port, id) {
+// Get container logs (timestamps optional — MUST be off for parsed output like git log)
+function getContainerLogs(host, port, id, timestamps = true) {
   return new Promise((resolve, reject) => {
     const agent = createAgent(host);
     if (!agent) return reject(new Error('TLS certs not loaded'));
@@ -684,7 +684,7 @@ function getContainerLogs(host, port, id) {
     const options = {
       hostname: host,
       port: port || 2376,
-      path: `/containers/${id}/logs?stdout=true&stderr=true&tail=200&timestamps=true`,
+      path: `/containers/${id}/logs?stdout=true&stderr=true&tail=200&timestamps=${timestamps}`,
       method: 'GET',
       agent
     };
@@ -1166,6 +1166,53 @@ ipcMain.on('app:open-url', (_, url) => {
 
 // ─── Docker events stream (Activity feed) ─────────────────────────────────────
 let eventsBuffer = [], eventsReq = null, eventsHost = null;
+const eventsBackfilled = {}; // host → last backfill ts
+
+function parseEventLine(line, host) {
+  try {
+    const ev = JSON.parse(line);
+    const action = ev.Action || '';
+    if (/^exec_|^top$|^archive|^prune$/.test(action)) return null; // our own polling noise
+    const type = ev.Type || 'container';
+    if (!['container', 'image', 'volume', 'network'].includes(type)) return null;
+    const attrs = (ev.Actor && ev.Actor.Attributes) || {};
+    return {
+      t: ev.time ? ev.time * 1000 : Date.now(),
+      type, action,
+      name: attrs.name || attrs.image || (ev.Actor && (ev.Actor.ID || '').slice(0, 12)) || '',
+      extra: attrs.exitCode ? 'exit ' + attrs.exitCode : (type === 'image' ? attrs.name || '' : ''),
+      host
+    };
+  } catch { return null; }
+}
+
+// Seed the Activity feed with the last 24h of history. Without this the feed is
+// empty until something happens AFTER the live stream connects — which read as
+// "the Activity tab shows nothing at all".
+async function backfillEvents(host, port) {
+  if (eventsBackfilled[host] && Date.now() - eventsBackfilled[host] < 5 * 60e3) return;
+  eventsBackfilled[host] = Date.now();
+  try {
+    const now = Math.floor(Date.now() / 1000);
+    const r = await dockerRequest({ host, port, path: `/events?since=${now - 86400}&until=${now}`, timeout: 20000 });
+    const raw = typeof r.body === 'string' ? r.body : JSON.stringify(r.body || '');
+    const items = [];
+    for (const line of raw.split('\n')) {
+      const t = line.trim();
+      if (!t) continue;
+      const item = parseEventLine(t, host);
+      if (item) items.push(item);
+    }
+    if (!items.length) return;
+    const seen = new Set(eventsBuffer.map(e => `${e.t}|${e.type}|${e.action}|${e.name}`));
+    for (const it of items) {
+      const k = `${it.t}|${it.type}|${it.action}|${it.name}`;
+      if (!seen.has(k)) { eventsBuffer.push(it); seen.add(k); }
+    }
+    eventsBuffer.sort((a, b) => a.t - b.t);
+    if (eventsBuffer.length > 500) eventsBuffer = eventsBuffer.slice(-500);
+  } catch { /* history is best-effort; the live stream still runs */ }
+}
 
 function startEvents(host, port) {
   if (eventsReq) { try { eventsReq.destroy(); } catch {} eventsReq = null; }
@@ -1174,7 +1221,6 @@ function startEvents(host, port) {
   if (!agent) return;
   // Reconnect after any failure (error, end, or non-200) — a single hiccup must not kill Activity for good.
   const reconnect = () => { if (eventsHost === host) setTimeout(() => { if (eventsHost === host && !eventsReq) startEvents(host, port); }, 5000); };
-  const OK_TYPES = ['container', 'image', 'volume', 'network'];
   // No ?filters= — some Docker/Container Station builds reject the filter form and drop the stream. Filter types here instead.
   const req = https.request({ hostname: host, port: port || 2376, path: '/events', agent }, (res) => {
     if (res.statusCode !== 200) { res.resume(); eventsReq = null; reconnect(); return; }
@@ -1185,24 +1231,11 @@ function startEvents(host, port) {
       while ((i = acc.indexOf('\n')) >= 0) {
         const line = acc.slice(0, i).trim(); acc = acc.slice(i + 1);
         if (!line) continue;
-        try {
-          const ev = JSON.parse(line);
-          const action = ev.Action || '';
-          if (/^exec_|^top$|^archive|^prune$/.test(action)) continue; // our own polling noise
-          const type = ev.Type || 'container';
-          if (!OK_TYPES.includes(type)) continue;
-          const attrs = (ev.Actor && ev.Actor.Attributes) || {};
-          const item = {
-            t: ev.time ? ev.time * 1000 : Date.now(),
-            type, action,
-            name: attrs.name || attrs.image || (ev.Actor && (ev.Actor.ID || '').slice(0, 12)) || '',
-            extra: attrs.exitCode ? 'exit ' + attrs.exitCode : (type === 'image' ? attrs.name || '' : ''),
-            host
-          };
-          eventsBuffer.push(item);
-          if (eventsBuffer.length > 500) eventsBuffer.shift();
-          if (mainWin && !mainWin.isDestroyed()) mainWin.webContents.send('events:item', item);
-        } catch {}
+        const item = parseEventLine(line, host);
+        if (!item) continue;
+        eventsBuffer.push(item);
+        if (eventsBuffer.length > 500) eventsBuffer.shift();
+        if (mainWin && !mainWin.isDestroyed()) mainWin.webContents.send('events:item', item);
       }
     });
     res.on('end',   () => { eventsReq = null; reconnect(); });
@@ -1213,9 +1246,13 @@ function startEvents(host, port) {
   req.end();
 }
 
-ipcMain.on('events:start', (_, { host, port }) => startEvents(host, port));
-ipcMain.handle('events:list', (_, args) => {
+ipcMain.on('events:start', (_, { host, port }) => {
+  startEvents(host, port);
+  backfillEvents(host, port);
+});
+ipcMain.handle('events:list', async (_, args) => {
   const host = args && args.host;
+  if (host) await backfillEvents(host, (args && args.port) || 2376);
   return eventsBuffer.filter(e => !host || e.host === host);
 });
 
@@ -1243,14 +1280,138 @@ ipcMain.handle('docker:inspect', async (_, { host, port, id }) => {
   }
 });
 
-ipcMain.handle('docker:prune-images', async (_, { host, port }) => {
+ipcMain.handle('docker:prune-images', async (_, { host, port, all }) => {
   try {
-    // No filter = dangling images only (safe default)
-    const r = await dockerRequest({ host, port, path: '/images/prune', method: 'POST', timeout: 30000 });
+    // Default = dangling only (safe). all=true removes every image not used by a container (Portainer's "remove unused").
+    const filters = all ? '?filters=' + encodeURIComponent('{"dangling":["false"]}') : '';
+    const r = await dockerRequest({ host, port, path: '/images/prune' + filters, method: 'POST', timeout: 60000 });
+    if (r.status >= 400) return { ok: false, error: (r.body && r.body.message) || 'HTTP ' + r.status };
     return { ok: true, data: r.body };
   } catch (e) {
     return { ok: false, error: e.message };
   }
+});
+
+ipcMain.handle('docker:prune-containers', async (_, { host, port }) => {
+  try {
+    const r = await dockerRequest({ host, port, path: '/containers/prune', method: 'POST', timeout: 60000 });
+    if (r.status >= 400) return { ok: false, error: (r.body && r.body.message) || 'HTTP ' + r.status };
+    return { ok: true, data: r.body };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+});
+
+ipcMain.handle('docker:prune-volumes', async (_, { host, port }) => {
+  try {
+    const r = await dockerRequest({ host, port, path: '/volumes/prune', method: 'POST', timeout: 60000 });
+    if (r.status >= 400) return { ok: false, error: (r.body && r.body.message) || 'HTTP ' + r.status };
+    return { ok: true, data: r.body };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+});
+
+// ─── Edit / recreate a container with a modified config (Portainer-style "Duplicate/Edit") ──
+// Same stop → rename → create → start → delete dance as updates:apply, with rollback.
+ipcMain.handle('docker:recreate', async (_, { host, port, id, spec }) => {
+  try {
+    const ins = await dockerRequest({ host, port, path: `/containers/${id}/json` });
+    const c = ins.body;
+    if (!c || !c.Config) throw new Error('Inspect failed');
+    const oldName = (c.Name || '').replace(/^\//, '');
+    const newName = (spec.name || oldName).trim() || oldName;
+    const image = (spec.image || c.Config.Image).trim();
+
+    if (image !== c.Config.Image) await pullImage(host, port, image);
+
+    // Base payload = live config, then apply edits
+    const payload = { ...c.Config, Image: image, HostConfig: { ...(c.HostConfig || {}) } };
+    if (payload.Hostname && id.startsWith(payload.Hostname)) delete payload.Hostname;
+
+    if (Array.isArray(spec.env)) payload.Env = spec.env.filter(s => s && s.includes('='));
+
+    if (Array.isArray(spec.ports)) {
+      const ExposedPorts = {}, PortBindings = {};
+      for (const p of spec.ports) {
+        if (!p.cont) continue;
+        const key = `${p.cont}/${p.proto || 'tcp'}`;
+        ExposedPorts[key] = {};
+        PortBindings[key] = [{ HostPort: String(p.host || p.cont) }];
+      }
+      payload.ExposedPorts = Object.keys(ExposedPorts).length ? ExposedPorts : undefined;
+      payload.HostConfig.PortBindings = Object.keys(PortBindings).length ? PortBindings : {};
+    }
+
+    if (Array.isArray(spec.volumes)) {
+      payload.HostConfig.Binds = spec.volumes.filter(v => v.host && v.cont).map(v => `${v.host}:${v.cont}`);
+    }
+
+    if (spec.restart != null) {
+      payload.HostConfig.RestartPolicy = spec.restart && spec.restart !== 'no' ? { Name: spec.restart } : { Name: '' };
+    }
+    if (spec.network != null && spec.network !== '') payload.HostConfig.NetworkMode = spec.network;
+
+    // Preserve user-defined network endpoints (aliases, static IPs) unless the network was changed
+    if (spec.network == null || spec.network === '' || spec.network === c.HostConfig.NetworkMode) {
+      const endpoints = {};
+      for (const [net, conf] of Object.entries((c.NetworkSettings && c.NetworkSettings.Networks) || {})) {
+        endpoints[net] = {};
+        if (conf.Aliases) endpoints[net].Aliases = conf.Aliases.filter(a => !id.startsWith(a));
+        if (conf.IPAMConfig) endpoints[net].IPAMConfig = conf.IPAMConfig;
+      }
+      if (Object.keys(endpoints).length) payload.NetworkingConfig = { EndpointsConfig: endpoints };
+    }
+
+    const wasRunning = c.State && c.State.Running;
+    if (wasRunning) await dockerRequest({ host, port, path: `/containers/${id}/stop?t=20`, method: 'POST', timeout: 40000 });
+    const bak = `${oldName}-old-${Date.now().toString(36)}`;
+    await dockerRequest({ host, port, path: `/containers/${id}/rename?name=${encodeURIComponent(bak)}`, method: 'POST' });
+
+    let newId = null;
+    try {
+      const crr = await dockerRequest({ host, port, path: `/containers/create?name=${encodeURIComponent(newName)}`, method: 'POST', timeout: 40000 }, payload);
+      if (!crr.body || !crr.body.Id) throw new Error((crr.body && crr.body.message) || 'Create failed: ' + JSON.stringify(crr.body).slice(0, 200));
+      newId = crr.body.Id;
+      const sr = await dockerRequest({ host, port, path: `/containers/${newId}/start`, method: 'POST', timeout: 40000 });
+      if (sr.status >= 400) throw new Error('Start failed: ' + ((sr.body && sr.body.message) || 'HTTP ' + sr.status));
+      await dockerRequest({ host, port, path: `/containers/${id}?force=true`, method: 'DELETE', timeout: 40000 });
+      return { ok: true, newId };
+    } catch (err) {
+      // Rollback: remove half-made container, restore old name, restart old
+      if (newId) await dockerRequest({ host, port, path: `/containers/${newId}?force=true`, method: 'DELETE' }).catch(() => {});
+      await dockerRequest({ host, port, path: `/containers/${id}/rename?name=${encodeURIComponent(oldName)}`, method: 'POST' }).catch(() => {});
+      if (wasRunning) await dockerRequest({ host, port, path: `/containers/${id}/start`, method: 'POST' }).catch(() => {});
+      throw err;
+    }
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+});
+
+// ─── GitHub release watching (for update notifications) ──────────────────────
+ipcMain.handle('github:latest-release', async (_, { repo }) => {
+  try {
+    const clean = String(repo || '').trim()
+      .replace(/^https?:\/\/(www\.)?github\.com\//i, '').replace(/\.git$/, '').replace(/\/+$/, '');
+    if (!/^[\w.-]+\/[\w.-]+$/.test(clean)) return { ok: false, error: 'Use the owner/repo form, e.g. linuxserver/docker-radarr' };
+    const r = await regRequest('GET', `https://api.github.com/repos/${clean}/releases/latest`, {
+      'User-Agent': 'Portside-App', 'Accept': 'application/vnd.github+json'
+    });
+    if (r.status === 404) {
+      // Repos without releases: fall back to tags
+      const tr = await regRequest('GET', `https://api.github.com/repos/${clean}/tags?per_page=1`, {
+        'User-Agent': 'Portside-App', 'Accept': 'application/vnd.github+json'
+      });
+      if (tr.status !== 200) return { ok: false, error: 'No releases or tags found' };
+      const tags = JSON.parse(tr.body || '[]');
+      if (!tags.length) return { ok: false, error: 'No releases or tags found' };
+      return { ok: true, repo: clean, tag: tags[0].name, name: tags[0].name, url: `https://github.com/${clean}/tags`, publishedAt: null };
+    }
+    if (r.status !== 200) return { ok: false, error: 'GitHub HTTP ' + r.status };
+    const rel = JSON.parse(r.body);
+    return { ok: true, repo: clean, tag: rel.tag_name || '', name: rel.name || rel.tag_name || '', url: rel.html_url || `https://github.com/${clean}/releases`, publishedAt: rel.published_at || null };
+  } catch (e) { return { ok: false, error: e.message }; }
 });
 
 ipcMain.on('dock:badge', (_, count) => {
@@ -1324,7 +1485,9 @@ async function runGitContainer(host, port, folder, token, shellCmd) {
     if (sr.status >= 400) throw new Error('git container failed to start (HTTP ' + sr.status + ')');
     const wr = await dockerRequest({ host, port, path: `/containers/${id}/wait`, method: 'POST', timeout: 180000 });
     const exitCode = (wr.body && typeof wr.body.StatusCode === 'number') ? wr.body.StatusCode : -1;
-    const output = await getContainerLogs(host, port, id).catch(() => '');
+    // timestamps=false — gitdeploy:versions parses this output line-by-line, and a
+    // timestamp prefix would break the "<sha> <msg>" regex (the old "No versions found" bug).
+    const output = await getContainerLogs(host, port, id, false).catch(() => '');
     return { exitCode, output };
   } finally {
     dockerRequest({ host, port, path: `/containers/${id}?force=true`, method: 'DELETE' }).catch(() => {});

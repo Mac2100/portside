@@ -949,6 +949,34 @@
   .pcmd.sel { background: rgba(88,166,255,0.16); }
   .pcmd-empty { padding: 18px; text-align: center; color: var(--text-muted); font-size: 13px; }
   :root[data-theme="light"] .palette { background: linear-gradient(180deg, #ffffff, #f7f9fb); }
+
+  /* ── Container groups ────────────────────────────────────────── */
+  .group-section { margin-bottom: 18px; }
+  .group-header {
+    display: flex; align-items: center; gap: 8px;
+    font-size: 12px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase;
+    color: var(--text-muted); cursor: pointer; user-select: none;
+    padding: 4px 2px; margin-bottom: 10px; border-bottom: 1px solid var(--border);
+  }
+  .group-header:hover { color: var(--text); }
+  .group-header .gh-arrow { font-size: 10px; transition: transform .15s; }
+  .group-header.collapsed .gh-arrow { transform: rotate(-90deg); }
+  .group-header .gh-count { font-size: 11px; font-weight: 600; background: var(--bg2); border-radius: 10px; padding: 1px 8px; }
+  .group-section.collapsed .group-body { display: none; }
+
+  /* List view rows reuse .container-table; slightly denser */
+  .view-list .container-table td { padding-top: 7px; padding-bottom: 7px; }
+
+  /* Updates settings */
+  .upd-auto-row { display: flex; align-items: center; gap: 8px; padding: 4px 2px; font-size: 13px; }
+  .upd-auto-row input { accent-color: var(--accent); cursor: pointer; }
+  .ghwatch-row {
+    display: flex; align-items: center; gap: 10px;
+    padding: 7px 10px; border: 1px solid var(--border); border-radius: 8px;
+    margin-bottom: 6px; background: var(--bg0); font-size: 12.5px;
+  }
+  .ghwatch-row .gw-repo { font-family: 'SF Mono', monospace; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ghwatch-row .gw-tag { font-size: 11px; color: var(--text-muted); }
 </style>
 <link rel="stylesheet" href="node_modules/@xterm/xterm/css/xterm.css">
 </head>
@@ -1008,6 +1036,9 @@
     <div class="nav-section-label">Overview</div>
     <div class="nav-item active" data-page="dashboard">
       <span class="nav-icon">⊞</span> Dashboard
+    </div>
+    <div class="nav-item" data-page="insights">
+      <span class="nav-icon">💡</span> Insights
       <span class="nav-badge alert" id="nav-alerts-count" style="display:none">0</span>
     </div>
     <div class="nav-item" data-page="events">
@@ -1057,7 +1088,6 @@
           <span class="page-subtitle" id="docker-version-label"></span>
         </div>
         <div class="header-actions">
-          <button class="btn" id="updates-btn" title="Check registries for newer images">⬆ Check updates</button>
           <button class="btn btn-primary" id="dash-refresh-btn">↻ Refresh</button>
         </div>
       </div>
@@ -1145,11 +1175,23 @@
           </div>
         </div>
 
-        <!-- Insights -->
-        <div class="section-header">
-          <span class="section-title">Insights</span>
-          <span class="page-subtitle" id="last-refresh"></span>
+        <div class="page-subtitle" id="last-refresh" style="display:block;text-align:right;padding:2px 0 10px"></div>
+      </div>
+    </div>
+
+    <!-- ── INSIGHTS ────────────────────────────────────────────── -->
+    <div id="page-insights" class="page">
+      <div class="page-header">
+        <div>
+          <div class="page-title">Insights</div>
+          <span class="page-subtitle" id="insights-updated">alerts, updates &amp; housekeeping</span>
         </div>
+        <div class="header-actions">
+          <button class="btn" id="updates-btn" title="Check registries for newer images">⬆ Check updates</button>
+          <button class="btn btn-primary" id="insights-refresh-btn">↻ Refresh</button>
+        </div>
+      </div>
+      <div class="scroll-area">
         <div id="insights-list"></div>
       </div>
     </div>
@@ -1159,9 +1201,14 @@
       <div class="page-header">
         <div class="page-title">Containers</div>
         <div class="header-actions">
+          <div class="seg-group" id="cview-picker" style="padding:2px">
+            <button class="seg-btn active" data-cview="grid" title="Card grid">⊞ Grid</button>
+            <button class="seg-btn" data-cview="list" title="Compact list">☰ List</button>
+          </div>
           <button class="btn btn-success" id="deploy-btn">+ Deploy</button>
           <button class="btn" id="compose-btn">⬇ Import YAML</button>
-          <button class="btn" id="containers-show-all-btn">Show All</button>
+          <button class="btn" id="containers-show-all-btn">Running Only</button>
+          <button class="btn btn-warn" id="containers-prune-btn" title="Remove all stopped containers">🧹 Prune stopped</button>
           <button class="btn btn-primary" id="containers-refresh-btn">↻ Refresh</button>
         </div>
       </div>
@@ -1175,6 +1222,8 @@
       <div class="page-header">
         <div class="page-title">Images</div>
         <div class="header-actions">
+          <button class="btn btn-warn" id="images-prune-btn" title="Remove untagged (dangling) image layers">🧹 Prune dangling</button>
+          <button class="btn btn-danger" id="images-prune-all-btn" title="Remove every image not used by a container">🗑 Remove unused</button>
           <button class="btn btn-primary" id="images-refresh-btn">↻ Refresh</button>
         </div>
       </div>
@@ -1188,6 +1237,7 @@
       <div class="page-header">
         <div class="page-title">Volumes</div>
         <div class="header-actions">
+          <button class="btn btn-warn" id="volumes-prune-btn" title="Remove volumes not attached to any container">🧹 Prune unused</button>
           <button class="btn btn-primary" id="volumes-refresh-btn">↻ Refresh</button>
         </div>
       </div>
@@ -1351,6 +1401,33 @@
         </div>
 
         <div class="settings-card">
+          <div class="settings-card-title">🔄 Container Updates</div>
+          <div class="form-group">
+            <label class="form-label">Check registries for image updates</label>
+            <select class="form-input" id="setting-upd-interval" style="cursor:pointer">
+              <option value="0">Manually only</option>
+              <option value="21600000" selected>Every 6 hours</option>
+              <option value="43200000">Every 12 hours</option>
+              <option value="86400000">Once a day</option>
+            </select>
+          </div>
+          <div class="switch-row" style="margin-bottom:12px">
+            <input type="checkbox" id="setting-upd-notify" checked>
+            <label for="setting-upd-notify" style="font-size:13px;cursor:pointer">Notify me when an image update is found</label>
+          </div>
+          <div class="form-label" style="margin-bottom:4px">Auto-update these containers when a new image is found</div>
+          <div class="form-hint" style="margin-top:0;margin-bottom:8px">Checked containers are pulled &amp; recreated automatically on the schedule above — only when the registry actually has something new. Everything else just shows an Insight.</div>
+          <div id="upd-auto-list" style="max-height:220px;overflow-y:auto;margin-bottom:14px"></div>
+          <div class="form-label" style="margin-bottom:4px">Watch GitHub repos for new releases</div>
+          <div class="form-hint" style="margin-top:0;margin-bottom:8px">Get a notification and an Insight when a watched repo publishes a release (useful for apps you build yourself or track upstream).</div>
+          <div id="ghwatch-list" style="margin-bottom:8px"></div>
+          <div style="display:flex;gap:6px">
+            <input class="form-input" id="ghwatch-repo" placeholder="owner/repo  e.g. Mac2100/SignPro" spellcheck="false" style="flex:1">
+            <button class="btn btn-primary" id="ghwatch-add-btn">Watch</button>
+          </div>
+        </div>
+
+        <div class="settings-card">
           <div class="settings-card-title">⚙️ Auto Refresh</div>
           <div class="form-group">
             <label class="form-label">Refresh Interval</label>
@@ -1508,6 +1585,53 @@
   </div>
 </div>
 
+<!-- Edit container modal (recreate with modified config) -->
+<div class="modal-overlay" id="edit-modal">
+  <div class="modal" style="width:640px">
+    <div class="modal-header">
+      <span style="font-size:15px">✎</span>
+      <span class="modal-title" id="edit-title">Edit container</span>
+      <button class="btn btn-icon" id="edit-close-btn">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="deploy-label" style="margin-top:0">Image</div>
+      <input class="form-input" id="ed-image" spellcheck="false">
+      <div class="deploy-label">Container name</div>
+      <input class="form-input" id="ed-name" spellcheck="false">
+      <div class="deploy-label">Ports (host → container)</div>
+      <div id="ed-ports"></div>
+      <span class="kv-add" data-edadd="ports">+ Add port</span>
+      <div class="deploy-label">Volumes (host path → container path)</div>
+      <div id="ed-vols"></div>
+      <span class="kv-add" data-edadd="vols">+ Add volume</span>
+      <div class="deploy-label">Environment variables</div>
+      <div id="ed-envs"></div>
+      <span class="kv-add" data-edadd="envs">+ Add variable</span>
+      <div style="display:flex;gap:14px">
+        <div style="flex:1">
+          <div class="deploy-label">Restart policy</div>
+          <select class="form-input" id="ed-restart">
+            <option value="unless-stopped">unless-stopped</option>
+            <option value="always">always</option>
+            <option value="on-failure">on-failure</option>
+            <option value="no">no</option>
+          </select>
+        </div>
+        <div style="flex:1">
+          <div class="deploy-label">Network</div>
+          <select class="form-input" id="ed-network"></select>
+        </div>
+      </div>
+      <div class="form-hint" style="margin-top:12px">Saving recreates the container with the new settings (like Portainer's Duplicate/Edit). If anything fails, the original container is restored automatically.</div>
+    </div>
+    <div class="modal-footer">
+      <span id="edit-status" style="font-size:11px;color:var(--text-muted);margin-right:auto;align-self:center"></span>
+      <button class="btn" id="edit-cancel-btn">Cancel</button>
+      <button class="btn btn-primary" id="edit-save-btn">Recreate container</button>
+    </div>
+  </div>
+</div>
+
 <!-- Import YAML (compose) modal -->
 <div class="modal-overlay" id="compose-modal">
   <div class="modal" style="width:720px">
@@ -1586,6 +1710,9 @@
       </div>
       <div class="deploy-label" style="margin-top:0">Nickname</div>
       <input class="form-input" id="cust-nick" placeholder="Leave blank to use the real name" spellcheck="false" autocomplete="off">
+      <div class="deploy-label">Group</div>
+      <input class="form-input" id="cust-group" placeholder="e.g. Media, Tools — blank for no group" spellcheck="false" autocomplete="off" list="group-datalist">
+      <datalist id="group-datalist"></datalist>
       <div class="deploy-label">Color</div>
       <div class="swrow" id="cust-tints"></div>
       <div class="deploy-label">Icon</div>
@@ -1625,7 +1752,9 @@ const state = {
   statsCache: {},
   refreshTimer: null,
   refreshInterval: 10000,
-  showAllContainers: false,
+  showAllContainers: true,
+  containerView: 'grid',
+  collapsedGroups: {},
   hostInfo: null,
   history: { t: [], cpu: [], mem: [], rx: [], tx: [] },
   prevNet: null,
@@ -1693,6 +1822,7 @@ document.querySelectorAll('.nav-item').forEach(item => {
 
 function loadPage(pg) {
   if (pg === 'dashboard') loadDashboard();
+  if (pg === 'insights') renderInsights(state.lastPer || []);
   if (pg === 'containers') renderContainersList();
   if (pg === 'images') loadImages();
   if (pg === 'volumes') loadVolumes();
@@ -1725,7 +1855,7 @@ function eventRowHtml(ev) {
 }
 
 async function loadEvents() {
-  const evs = await api.events.list({ host: state.config.host });
+  const evs = await api.events.list({ host: state.config.host, port: state.config.port });
   $('events-list').innerHTML = evs.length
     ? evs.slice().reverse().map(eventRowHtml).join('')
     : '<div class="empty-state"><div class="empty-icon">☷</div><div class="empty-title">No events yet</div><div class="empty-sub">Container starts, stops, crashes and image pulls will appear here in real time.</div></div>';
@@ -1829,6 +1959,7 @@ async function init() {
 
   applyTheme(state.config.theme || 'system');
   applyLogo(state.config.logo || 'teal');
+  state.containerView = state.config.containerView || 'grid';
   if (state.config.refreshInterval !== undefined) {
     state.refreshInterval = state.config.refreshInterval;
     $('setting-interval').value = String(state.refreshInterval);
@@ -1849,7 +1980,8 @@ async function init() {
   }
   if (state.config.host) {
     checkUpdates(false);
-    setInterval(() => checkUpdates(true), 6 * 3600e3);
+    checkGhReleases(false);
+    scheduleUpdateChecks();
     api.events.start({ host: state.config.host, port: state.config.port });
   }
 }
@@ -1898,12 +2030,95 @@ async function checkUpdates(force, announce) {
   btn.disabled = false; btn.textContent = '⬆ Check updates';
   if (!r.ok) { if (announce) toast('Update check failed: ' + r.error, 'error'); return; }
   state.updates = r;
-  const n = r.results.filter(u => u.updateAvailable).length;
-  if (announce) toast(n ? `${n} image update${n > 1 ? 's' : ''} available` : 'Everything is up to date ✓', n ? 'info' : 'success');
+  const avail = r.results.filter(u => u.updateAvailable);
+  if (announce) toast(avail.length ? `${avail.length} image update${avail.length > 1 ? 's' : ''} available` : 'Everything is up to date ✓', avail.length ? 'info' : 'success');
+
+  // Notify once per image (not every 6h re-check)
+  const notified = new Set(state.config.updNotified || []);
+  const fresh = avail.filter(u => !notified.has(u.image));
+  if (fresh.length && state.config.updNotify !== false && !announce) {
+    try { new Notification('Portside', { body: `Image update${fresh.length > 1 ? 's' : ''} available: ${fresh.map(u => u.shortName).join(', ')}` }); } catch {}
+  }
+  saveCfg({ updNotified: avail.map(u => u.image) });
+
   renderInsights(state.lastPer || []);
+  autoApplyUpdates(avail);
 }
 
 $('updates-btn').addEventListener('click', () => checkUpdates(true, true));
+
+// ─── Auto-update: redeploy opted-in containers ONLY when the registry has something new ──
+async function autoApplyUpdates(avail) {
+  if (state._autoUpdating) return;
+  const auto = state.config.autoUpdate || {};
+  const jobs = [];
+  for (const u of avail) {
+    for (const c of u.containers) if (auto[c.name]) jobs.push({ u, c });
+  }
+  if (!jobs.length) return;
+  state._autoUpdating = true;
+  try {
+    let applied = 0;
+    for (const { u, c } of jobs) {
+      toast(`Auto-updating ${c.name} (${u.shortName})…`, 'info', 7000);
+      const r = await api.updates.apply({ ...state.config, id: c.id });
+      if (r.ok) {
+        applied++;
+        toast(`${c.name} auto-updated ✓`, 'success', 6000);
+        try { new Notification('Portside', { body: `${c.name} was updated to the latest ${u.shortName} image` }); } catch {}
+      } else {
+        toast(`${c.name} auto-update failed: ${r.error}`, 'error', 9000);
+        try { new Notification('Portside', { body: `Auto-update of ${c.name} failed — the old container was restored` }); } catch {}
+      }
+    }
+    if (applied) {
+      const rc = await api.updates.check({ ...state.config, force: true });
+      if (rc.ok) state.updates = rc;
+      loadDashboard();
+    }
+  } finally { state._autoUpdating = false; }
+}
+
+// ─── GitHub release watching ──────────────────────────────────────────────────
+async function checkGhReleases(announce) {
+  const watch = state.config.ghWatch || [];
+  if (!watch.length) { state.ghNew = []; return; }
+  const seen = state.config.ghSeen || {};
+  const prevNew = new Set((state.ghNew || []).map(g => g.repo + '@' + g.tag));
+  const found = [];
+  state.ghLatest = state.ghLatest || {};
+  for (const repo of watch) {
+    const r = await api.github.latestRelease({ repo });
+    if (!r.ok) { if (announce) toast(`${repo}: ${r.error}`, 'error', 6000); continue; }
+    state.ghLatest[r.repo] = r;
+    if (r.tag && seen[r.repo] !== r.tag) found.push(r);
+  }
+  state.ghNew = found;
+  const fresh = found.filter(g => !prevNew.has(g.repo + '@' + g.tag));
+  if (fresh.length && state.config.updNotify !== false && !announce) {
+    try { new Notification('Portside', { body: `New release: ${fresh.map(g => `${g.repo} ${g.tag}`).join(', ')}` }); } catch {}
+  }
+  if (typeof renderGhWatchList === 'function' && $('page-settings').classList.contains('active')) renderGhWatchList();
+  renderInsights(state.lastPer || []);
+}
+
+function markGhSeen(repo) {
+  const g = (state.ghNew || []).find(x => x.repo === repo);
+  if (!g) return;
+  saveCfg({ ghSeen: { ...(state.config.ghSeen || {}), [repo]: g.tag } });
+  state.ghNew = state.ghNew.filter(x => x.repo !== repo);
+  state._insightsHtml = null;
+  renderInsights(state.lastPer || []);
+}
+
+// ─── Update check scheduling (registry + GitHub on the same clock) ────────────
+let updTimer = null;
+function scheduleUpdateChecks() {
+  if (updTimer) clearInterval(updTimer);
+  const iv = state.config.updInterval !== undefined ? +state.config.updInterval : 6 * 3600e3;
+  if (!iv) return; // manual only
+  updTimer = setInterval(() => { checkUpdates(true); checkGhReleases(); }, iv);
+}
 
 function showPage(name) {
   document.querySelectorAll('.nav-item').forEach(n => n.classList.toggle('active', n.dataset.page === name));
@@ -2355,6 +2570,16 @@ function renderInsights(per) {
       }));
   }
 
+  // — Watched GitHub repos with a new release —
+  (state.ghNew || []).forEach(g =>
+    items.push({
+      sev: 'warn', icon: '🐙',
+      title: `New release — ${g.repo}`,
+      sub: `${g.tag}${g.name && g.name !== g.tag ? ' · ' + g.name : ''}`,
+      value: '',
+      action: `<button class="btn gh-rel-btn" data-repo="${g.repo}" data-url="${g.url}">View</button><button class="btn gh-seen-btn" data-repo="${g.repo}" title="Mark as seen">✓</button>`
+    }));
+
   // — Storage —
   if (state.df) {
     const layers = state.df.LayersSize || 0;
@@ -2392,13 +2617,22 @@ function renderInsights(per) {
   state.alertCount = shown;      // feeds tray + dock; real alerts still render in the list below
   api.dockBadge(shown);
 
-  $('insights-list').innerHTML = items.map(i => `
+  const upd = $('insights-updated');
+  if (upd) upd.textContent = 'updated ' + new Date().toLocaleTimeString();
+
+  // Only rewrite the DOM when the content actually changed — the old behavior
+  // (full innerHTML rebuild every refresh) made items flicker and "disappear"
+  // under the cursor mid-read.
+  const html = items.map(i => `
     <div class="insight-item ${i.sev}${i.cid ? ' clickable' : ''}"${i.cid ? ` data-cid="${i.cid}"` : ''}>
       <div class="insight-icon">${i.icon}</div>
       <div class="insight-body"><div class="insight-title">${i.title}</div><div class="insight-sub">${i.sub}</div></div>
       <div class="insight-value">${i.value}</div>
       ${i.action ? `<div class="insight-action">${i.action}</div>` : ''}
     </div>`).join('');
+  if (html === state._insightsHtml) return;
+  state._insightsHtml = html;
+  $('insights-list').innerHTML = html;
 
   // Clickable insights → container detail
   document.querySelectorAll('#insights-list .insight-item[data-cid]').forEach(el =>
@@ -2441,6 +2675,15 @@ function renderInsights(per) {
       pb.disabled = false; pb.textContent = 'Prune';
     }
   });
+
+  // GitHub release actions
+  document.querySelectorAll('.gh-rel-btn').forEach(b => b.addEventListener('click', (e) => {
+    e.stopPropagation(); api.openUrl(b.dataset.url);
+  }));
+  document.querySelectorAll('.gh-seen-btn').forEach(b => b.addEventListener('click', (e) => {
+    e.stopPropagation();
+    markGhSeen(b.dataset.repo);
+  }));
 }
 
 function setConnected(ok) {
@@ -2485,6 +2728,7 @@ function renderContainerTable(targetId, containers) {
                <button class="btn btn-icon font-mono" data-action="console" data-id="${c.Id}" title="Console" style="font-size:10px">&gt;_</button>`
             : `<button class="btn btn-success btn-icon" data-action="start" data-id="${c.Id}" title="Start">▶</button>`}
           <button class="btn btn-icon" data-action="logs" data-id="${c.Id}" title="Logs">≡</button>
+          <button class="btn btn-icon" data-action="edit" data-id="${c.Id}" title="Edit container">✎</button>
         </div>
       </td>
     </tr>`;
@@ -2512,6 +2756,7 @@ function renderContainerTable(targetId, containers) {
       if (action === 'logs') { openLogs(id, btn.closest('tr').dataset.name); return; }
       if (action === 'console') { openTerminalFor(id); return; }
       if (action === 'web') { api.openUrl(`http://${state.config.host}:${btn.dataset.wport}`); return; }
+      if (action === 'edit') { openEditContainer(id); return; }
       const rowName = btn.closest('tr') ? btn.closest('tr').dataset.name : id.slice(0, 12);
       const ok = await runContainerAction(id, action, rowName, btn);
       if (ok) setTimeout(() => loadDashboard(), 1500);
@@ -2592,9 +2837,62 @@ function drawSparkline(svgId, values) {
   svg.innerHTML = `<path d="${area}" fill="${tint}" fill-opacity="0.15"/><polyline points="${pts}" fill="none" stroke="${tint}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`;
 }
 
-function renderContainersList() {
-  renderContainerCards('containers-list', state.containers);
+function visibleContainers() {
+  return state.showAllContainers
+    ? state.containers
+    : state.containers.filter(c => (c.State || '').toLowerCase() === 'running');
 }
+
+function containerGroupName(c) {
+  const nm = sanitizeName(c.Names && c.Names[0]);
+  return (state.config.gcGroups || {})[nm] || '';
+}
+
+function escHtml(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch])); }
+
+function renderContainersList() {
+  const el = $('containers-list');
+  el.classList.toggle('view-list', state.containerView === 'list');
+  document.querySelectorAll('#cview-picker .seg-btn').forEach(b =>
+    b.classList.toggle('active', b.dataset.cview === state.containerView));
+  const list = visibleContainers();
+  const render = state.containerView === 'list' ? renderContainerTable : renderContainerCards;
+
+  const hasGroups = list.some(c => containerGroupName(c));
+  if (!hasGroups) { render('containers-list', list); return; }
+
+  const groups = new Map();
+  for (const c of list) {
+    const g = containerGroupName(c) || 'Ungrouped';
+    if (!groups.has(g)) groups.set(g, []);
+    groups.get(g).push(c);
+  }
+  const names = [...groups.keys()].sort((a, b) =>
+    ((a === 'Ungrouped') - (b === 'Ungrouped')) || a.localeCompare(b));
+
+  el.innerHTML = names.map((g, i) => {
+    const collapsed = !!state.collapsedGroups[g];
+    return `<div class="group-section${collapsed ? ' collapsed' : ''}" data-gi="${i}">
+      <div class="group-header${collapsed ? ' collapsed' : ''}"><span class="gh-arrow">▾</span>${escHtml(g)}<span class="gh-count">${groups.get(g).length}</span></div>
+      <div class="group-body" id="grp-body-${i}"></div>
+    </div>`;
+  }).join('');
+  names.forEach((g, i) => { if (!state.collapsedGroups[g]) render(`grp-body-${i}`, groups.get(g)); });
+  el.querySelectorAll('.group-header').forEach(h =>
+    h.addEventListener('click', () => {
+      const g = names[+h.parentElement.dataset.gi];
+      state.collapsedGroups[g] = !state.collapsedGroups[g];
+      renderContainersList();
+    }));
+}
+
+// Grid / List toggle (persisted)
+document.querySelectorAll('#cview-picker .seg-btn').forEach(b =>
+  b.addEventListener('click', () => {
+    state.containerView = b.dataset.cview;
+    saveCfg({ containerView: state.containerView });
+    renderContainersList();
+  }));
 
 function renderContainerCards(targetId, containers) {
   const el = $(targetId);
@@ -2622,9 +2920,11 @@ function renderContainerCards(targetId, containers) {
       ? `<button class="btn btn-warn" data-action="stop" data-id="${c.Id}">■ Stop</button>
          <button class="btn" data-action="restart" data-id="${c.Id}">↻ Restart</button>
          <button class="btn ic" data-action="logs" data-id="${c.Id}" title="Logs">≡</button>
+         <button class="btn ic" data-action="edit" data-id="${c.Id}" title="Edit container">✎</button>
          <button class="btn ic" data-action="customize" title="Customize">🎨</button>`
       : `<button class="btn btn-success" data-action="start" data-id="${c.Id}">▶ Start</button>
          <button class="btn ic" data-action="logs" data-id="${c.Id}" title="Logs">≡</button>
+         <button class="btn ic" data-action="edit" data-id="${c.Id}" title="Edit container">✎</button>
          <button class="btn ic" data-action="customize" title="Customize">🎨</button>`;
     return `<div class="gcard" data-id="${c.Id}" data-name="${name}" style="--tint:${tint}">
       <div class="gc-top">
@@ -2655,6 +2955,7 @@ function renderContainerCards(targetId, containers) {
       if (action === 'console') { openTerminalFor(id); return; }
       if (action === 'web') { api.openUrl(`http://${state.config.host}:${btn.dataset.wport}`); return; }
       if (action === 'customize') { openCustomize(rowName); return; }
+      if (action === 'edit') { openEditContainer(id); return; }
       const ok = await runContainerAction(id, action, rowName, btn);
       if (ok) setTimeout(() => loadDashboard(), 1500);
     });
@@ -2704,6 +3005,7 @@ async function openDetail(id) {
   } else {
     acts.innerHTML = `<button class="btn btn-success" data-action="start" data-id="${id}">▶ Start</button>`;
   }
+  acts.innerHTML += `<button class="btn" id="detail-edit-btn" title="Edit ports, volumes, env, image…">✎ Edit</button>`;
   acts.innerHTML += `<button class="btn btn-danger" data-action="remove" data-id="${id}">✕ Remove</button>`;
   acts.innerHTML += `<button class="btn" id="detail-gitdeploy-btn" title="Pull latest from GitHub & restart">⬆ Deploy</button>`;
 
@@ -2720,6 +3022,8 @@ async function openDetail(id) {
 
   const gd = $('detail-gitdeploy-btn');
   if (gd) gd.onclick = () => openGitDeploy(id, name);
+  const eb = $('detail-edit-btn');
+  if (eb) eb.onclick = () => openEditContainer(id);
 
   // Info section
   const ports = (c.Ports || []).filter(p => p.PublicPort).map(p => `${p.IP || '0.0.0.0'}:${p.PublicPort} → ${p.PrivatePort}/${p.Type || 'tcp'}`);
@@ -3330,8 +3634,110 @@ $('gd-rollback-btn').addEventListener('click', () => {
   if (sha && confirm('Deploy commit ' + sha.slice(0,7) + '? This replaces the live files with that version, then restarts.')) gdDeploy(sha);
 });
 
-document.querySelectorAll('.kv-add').forEach(a =>
-  a.addEventListener('click', () => $('dep-' + a.dataset.add).appendChild(kvRow(a.dataset.add))));
+// ─── Edit container (recreate with modified config) ──────────────────────────
+let editId = null;
+
+function edKvRow(kind, k = '', v = '') {
+  const row = kvRow(kind);
+  const ki = row.querySelector('[data-k]'), vi = row.querySelector('[data-v]');
+  if (ki) ki.value = k;
+  if (vi) vi.value = v;
+  return row;
+}
+
+async function openEditContainer(id) {
+  const c = state.containers.find(x => x.Id === id);
+  if (!c) return;
+  const name = sanitizeName(c.Names && c.Names[0]);
+  $('edit-title').textContent = 'Edit — ' + name;
+  $('edit-status').textContent = 'Loading current config…';
+  ['ed-ports', 'ed-vols', 'ed-envs'].forEach(i => { $(i).innerHTML = ''; });
+  $('edit-modal').classList.add('open');
+
+  const r = await api.docker.inspect({ ...state.config, id });
+  if (!r.ok || !r.data) { toast('Inspect failed: ' + (r.error || ''), 'error'); $('edit-modal').classList.remove('open'); return; }
+  const ins = r.data;
+  editId = id;
+
+  $('ed-image').value = ins.Config.Image || '';
+  $('ed-name').value = name;
+
+  // Ports from HostConfig.PortBindings (falls back to one empty row)
+  const pb = (ins.HostConfig && ins.HostConfig.PortBindings) || {};
+  const portRows = Object.entries(pb).flatMap(([key, binds]) => {
+    const [cont] = key.split('/');
+    return (binds || []).map(b => [b.HostPort || cont, cont]);
+  });
+  portRows.forEach(([h, ct]) => $('ed-ports').appendChild(edKvRow('ports', h, ct)));
+  if (!portRows.length) $('ed-ports').appendChild(kvRow('ports'));
+
+  // Volumes from Binds
+  const binds = (ins.HostConfig && ins.HostConfig.Binds) || [];
+  binds.forEach(b => {
+    const i = b.indexOf(':');
+    if (i > 0) $('ed-vols').appendChild(edKvRow('vols', b.slice(0, i), b.slice(i + 1)));
+  });
+  if (!binds.length) $('ed-vols').appendChild(kvRow('vols'));
+
+  // Env
+  const envs = (ins.Config && ins.Config.Env) || [];
+  envs.forEach(e => $('ed-envs').appendChild(edKvRow('envs', e)));
+  if (!envs.length) $('ed-envs').appendChild(kvRow('envs'));
+
+  $('ed-restart').value = (ins.HostConfig && ins.HostConfig.RestartPolicy && ins.HostConfig.RestartPolicy.Name) || 'no';
+  const netSel = $('ed-network');
+  const curNet = (ins.HostConfig && ins.HostConfig.NetworkMode) || 'bridge';
+  const netNames = new Set(['bridge', 'host', ...state.networks.map(n => n.Name)]);
+  netNames.add(curNet);
+  netSel.innerHTML = [...netNames].filter(n => n !== 'none').map(n =>
+    `<option value="${escHtml(n)}"${n === curNet ? ' selected' : ''}>${escHtml(n)}</option>`).join('');
+
+  $('edit-status').textContent = '';
+}
+
+function closeEditContainer() { $('edit-modal').classList.remove('open'); editId = null; }
+$('edit-close-btn').addEventListener('click', closeEditContainer);
+$('edit-cancel-btn').addEventListener('click', closeEditContainer);
+document.querySelectorAll('[data-edadd]').forEach(a =>
+  a.addEventListener('click', () => $('ed-' + a.dataset.edadd).appendChild(kvRow(a.dataset.edadd))));
+
+$('edit-save-btn').addEventListener('click', async () => {
+  if (!editId) return;
+  const image = $('ed-image').value.trim();
+  if (!image) { toast('Image can\'t be empty', 'error'); return; }
+  const rows = (id) => [...document.querySelectorAll(`#${id} .kv-row`)];
+  const spec = {
+    image,
+    name: $('ed-name').value.trim(),
+    ports: rows('ed-ports').map(r => ({ host: r.querySelector('[data-k]').value.trim(), cont: r.querySelector('[data-v]')?.value.trim() })).filter(p => p.cont),
+    volumes: rows('ed-vols').map(r => ({ host: r.querySelector('[data-k]').value.trim(), cont: r.querySelector('[data-v]')?.value.trim() })).filter(v => v.host && v.cont),
+    env: rows('ed-envs').map(r => r.querySelector('[data-k]').value.trim()).filter(Boolean),
+    restart: $('ed-restart').value,
+    network: $('ed-network').value
+  };
+  const c = state.containers.find(x => x.Id === editId);
+  const name = c ? sanitizeName(c.Names && c.Names[0]) : editId.slice(0, 12);
+  if (!confirm(`Recreate "${name}" with the new settings?\n\nThe container is stopped, recreated and restarted. If anything fails, the original is restored.`)) return;
+  const btn = $('edit-save-btn');
+  btn.disabled = true; btn.textContent = 'Recreating…';
+  $('edit-status').textContent = image !== (c && c.Image) ? 'Pulling image & recreating…' : 'Recreating…';
+  const r = await api.docker.recreate({ ...state.config, id: editId, spec });
+  btn.disabled = false; btn.textContent = 'Recreate container';
+  $('edit-status').textContent = '';
+  if (r.ok) {
+    toast(`${spec.name || name} recreated ✓`, 'success', 5000);
+    closeEditContainer(); closeDetail();
+    await loadDashboard();
+    renderContainersList();
+  } else {
+    toast('Edit failed: ' + r.error + ' — original container restored', 'error', 9000);
+  }
+});
+
+document.querySelectorAll('.kv-add').forEach(a => {
+  if (a.dataset.edadd) return; // edit-modal rows handled above
+  a.addEventListener('click', () => $('dep-' + a.dataset.add).appendChild(kvRow(a.dataset.add)));
+});
 $('deploy-btn').addEventListener('click', openDeploy);
 $('deploy-close-btn').addEventListener('click', closeDeploy);
 $('deploy-cancel-btn').addEventListener('click', closeDeploy);
@@ -3427,6 +3833,9 @@ function openCustomize(name) {
   gcuTint = cust.tint || null; gcuIcon = cust.icon || null;
   $('cust-title').textContent = 'Customize — ' + name;
   $('cust-nick').value = cust.nickname || '';
+  $('cust-group').value = (state.config.gcGroups || {})[name] || '';
+  $('group-datalist').innerHTML = [...new Set(Object.values(state.config.gcGroups || {}))]
+    .sort().map(g => `<option value="${escHtml(g)}">`).join('');
   $('cust-tints').innerHTML = `<div class="sw auto${gcuTint ? '' : ' sel'}" data-tint="">Auto</div>` +
     GC_TINTS.map(t => `<div class="sw${gcuTint === t ? ' sel' : ''}" data-tint="${t}" style="background:${t}"></div>`).join('');
   $('cust-icons').innerHTML = `<div class="ic-opt${gcuIcon ? '' : ' sel'}" data-icon="">${gcMono(name)}</div>` +
@@ -3455,12 +3864,16 @@ $('cust-save-btn').addEventListener('click', () => {
   if (gcuIcon) obj.icon = gcuIcon;
   const all = { ...(state.config.gcCustom || {}) };
   if (Object.keys(obj).length) all[gcuName] = obj; else delete all[gcuName];
-  saveCfg({ gcCustom: all });
+  const groups = { ...(state.config.gcGroups || {}) };
+  const grp = $('cust-group').value.trim();
+  if (grp) groups[gcuName] = grp; else delete groups[gcuName];
+  saveCfg({ gcCustom: all, gcGroups: groups });
   closeCustomize(); renderContainersList(); toast('Customization saved', 'success');
 });
 $('cust-reset-btn').addEventListener('click', () => {
   const all = { ...(state.config.gcCustom || {}) }; delete all[gcuName];
-  saveCfg({ gcCustom: all });
+  const groups = { ...(state.config.gcGroups || {}) }; delete groups[gcuName];
+  saveCfg({ gcCustom: all, gcGroups: groups });
   closeCustomize(); renderContainersList(); toast('Reset to default', 'info');
 });
 
@@ -3469,7 +3882,7 @@ function navTo(pg) { const it = [...document.querySelectorAll('.nav-item')].find
 let palItems = [], palSel = 0;
 function buildPaletteCommands() {
   const cmds = [];
-  [['dashboard','⊞','Dashboard'],['events','☷','Activity'],['containers','◫','Containers'],['images','◱','Images'],['volumes','⬡','Volumes'],['networks','⬡','Networks'],['terminal','›','Terminal'],['files','◳','File Browser'],['settings','⚙','Settings']]
+  [['dashboard','⊞','Dashboard'],['insights','💡','Insights'],['events','☷','Activity'],['containers','◫','Containers'],['images','◱','Images'],['volumes','⬡','Volumes'],['networks','⬡','Networks'],['terminal','›','Terminal'],['files','◳','File Browser'],['settings','⚙','Settings']]
     .forEach(([pg, ic, label]) => cmds.push({ icon: ic, label: 'Go to ' + label, sub: 'page', run: () => navTo(pg) }));
   cmds.push({ icon: '🚀', label: 'Deploy a container', sub: 'action', run: () => { navTo('containers'); openDeploy(); } });
   cmds.push({ icon: '⬇', label: 'Import from YAML', sub: 'action', run: () => { navTo('containers'); openComposeImport(); } });
@@ -3683,7 +4096,86 @@ async function loadSettings() {
   $('setting-alertbadge').checked = state.config.alertBadge !== false;
   refreshCertStatus();
   refreshGitTokenState();
+  renderUpdSettings();
 }
+
+// ─── Container Updates settings ───────────────────────────────────────────────
+function renderUpdSettings() {
+  $('setting-upd-interval').value = String(state.config.updInterval !== undefined ? state.config.updInterval : 21600000);
+  $('setting-upd-notify').checked = state.config.updNotify !== false;
+
+  const auto = state.config.autoUpdate || {};
+  const names = [...new Set(state.containers.map(c => sanitizeName(c.Names && c.Names[0])))].sort();
+  $('upd-auto-list').innerHTML = names.length
+    ? names.map(n => `<label class="upd-auto-row"><input type="checkbox" data-au="${escHtml(n)}"${auto[n] ? ' checked' : ''}> ${escHtml(n)}</label>`).join('')
+    : '<div class="form-hint">Connect to a host to list containers.</div>';
+  $('upd-auto-list').querySelectorAll('[data-au]').forEach(cb =>
+    cb.addEventListener('change', () => {
+      const a = { ...(state.config.autoUpdate || {}) };
+      if (cb.checked) a[cb.dataset.au] = true; else delete a[cb.dataset.au];
+      saveCfg({ autoUpdate: a });
+    }));
+
+  renderGhWatchList();
+}
+
+function renderGhWatchList() {
+  const watch = state.config.ghWatch || [];
+  const seen = state.config.ghSeen || {};
+  const latest = state.ghLatest || {};
+  $('ghwatch-list').innerHTML = watch.length
+    ? watch.map(repo => {
+        const l = latest[repo];
+        const tag = (l && l.tag) || seen[repo] || '';
+        const isNew = (state.ghNew || []).some(g => g.repo === repo);
+        return `<div class="ghwatch-row">
+          <span class="gw-repo">${escHtml(repo)}</span>
+          ${tag ? `<span class="gw-tag">${isNew ? '🆕 ' : ''}${escHtml(tag)}</span>` : ''}
+          <button class="btn btn-icon" data-gw-remove="${escHtml(repo)}" title="Stop watching">✕</button>
+        </div>`;
+      }).join('')
+    : '<div class="form-hint">Not watching any repos yet.</div>';
+  $('ghwatch-list').querySelectorAll('[data-gw-remove]').forEach(b =>
+    b.addEventListener('click', () => {
+      const repo = b.dataset.gwRemove;
+      const seen2 = { ...(state.config.ghSeen || {}) }; delete seen2[repo];
+      saveCfg({ ghWatch: (state.config.ghWatch || []).filter(r => r !== repo), ghSeen: seen2 });
+      state.ghNew = (state.ghNew || []).filter(g => g.repo !== repo);
+      renderGhWatchList();
+      renderInsights(state.lastPer || []);
+    }));
+}
+
+$('setting-upd-interval').addEventListener('change', (e) => {
+  saveCfg({ updInterval: +e.target.value });
+  scheduleUpdateChecks();
+  toast(+e.target.value ? 'Update checks scheduled' : 'Automatic update checks off — use the button on Insights', 'info', 4000);
+});
+
+$('setting-upd-notify').addEventListener('change', (e) => {
+  saveCfg({ updNotify: e.target.checked });
+});
+
+$('ghwatch-add-btn').addEventListener('click', async () => {
+  const raw = $('ghwatch-repo').value.trim();
+  if (!raw) { toast('Enter a repo as owner/repo', 'error'); return; }
+  const btn = $('ghwatch-add-btn');
+  btn.disabled = true; btn.textContent = 'Checking…';
+  const r = await api.github.latestRelease({ repo: raw });
+  btn.disabled = false; btn.textContent = 'Watch';
+  if (!r.ok) { toast(r.error || 'Repo not found', 'error', 6000); return; }
+  const watch = state.config.ghWatch || [];
+  if (watch.includes(r.repo)) { toast('Already watching ' + r.repo, 'info'); return; }
+  // Record the current release as "seen" so only FUTURE releases alert
+  saveCfg({
+    ghWatch: [...watch, r.repo],
+    ghSeen: { ...(state.config.ghSeen || {}), [r.repo]: r.tag }
+  });
+  state.ghLatest = { ...(state.ghLatest || {}), [r.repo]: r };
+  $('ghwatch-repo').value = '';
+  toast(`Watching ${r.repo} — current release ${r.tag || 'n/a'}. You'll be notified on the next one.`, 'success', 6000);
+  renderGhWatchList();
+});
 
 // Menu bar toggle
 $('setting-tray').addEventListener('change', async (e) => {
@@ -3806,6 +4298,48 @@ $('containers-show-all-btn').addEventListener('click', () => {
 $('images-refresh-btn').addEventListener('click', async () => { state.images = []; await loadImages(); });
 $('volumes-refresh-btn').addEventListener('click', async () => { state.volumes = []; await loadVolumes(); });
 $('networks-refresh-btn').addEventListener('click', async () => { state.networks = []; await loadNetworks(); });
+$('insights-refresh-btn').addEventListener('click', loadDashboard);
+
+// ─── Prune / remove unused (Portainer-style housekeeping) ─────────────────────
+async function runPrune(btn, label, confirmMsg, fn, summarize, after) {
+  if (!confirm(confirmMsg)) return;
+  const orig = btn.textContent;
+  btn.disabled = true; btn.textContent = 'Pruning…';
+  const r = await fn();
+  btn.disabled = false; btn.textContent = orig;
+  if (!r.ok) { toast(`${label} failed: ${r.error}`, 'error', 7000); return; }
+  toast(summarize(r.data || {}), 'success', 6000);
+  state.dfFetched = 0;
+  if (after) await after();
+}
+
+$('containers-prune-btn').addEventListener('click', () =>
+  runPrune($('containers-prune-btn'), 'Prune',
+    'Remove ALL stopped containers?\n\nTheir writable layers are deleted. Images, volumes and bind-mounted data are untouched.',
+    () => api.docker.pruneContainers(state.config),
+    d => `Removed ${(d.ContainersDeleted || []).length} stopped container${(d.ContainersDeleted || []).length === 1 ? '' : 's'} — reclaimed ${fmt(d.SpaceReclaimed || 0)}`,
+    async () => { await loadDashboard(); renderContainersList(); }));
+
+$('images-prune-btn').addEventListener('click', () =>
+  runPrune($('images-prune-btn'), 'Prune',
+    'Remove dangling (untagged) image layers?\n\nThese are leftovers from image updates and are safe to delete.',
+    () => api.docker.pruneImages(state.config),
+    d => `Pruned ${(d.ImagesDeleted || []).length} image${(d.ImagesDeleted || []).length === 1 ? '' : 's'} — reclaimed ${fmt(d.SpaceReclaimed || 0)}`,
+    async () => { state.images = []; await loadImages(); loadDashboard(); }));
+
+$('images-prune-all-btn').addEventListener('click', () =>
+  runPrune($('images-prune-all-btn'), 'Remove unused',
+    'Remove EVERY image not used by a container?\n\nLike Portainer\'s "Remove unused images". Anything you later redeploy will be pulled again from the registry.',
+    () => api.docker.pruneImages({ ...state.config, all: true }),
+    d => `Removed ${(d.ImagesDeleted || []).length} unused image${(d.ImagesDeleted || []).length === 1 ? '' : 's'} — reclaimed ${fmt(d.SpaceReclaimed || 0)}`,
+    async () => { state.images = []; await loadImages(); loadDashboard(); }));
+
+$('volumes-prune-btn').addEventListener('click', () =>
+  runPrune($('volumes-prune-btn'), 'Prune',
+    'Remove volumes not attached to any container?\n\n⚠ Data in those volumes is permanently deleted. Bind mounts (host folders) are NOT affected.',
+    () => api.docker.pruneVolumes(state.config),
+    d => `Removed ${(d.VolumesDeleted || []).length} volume${(d.VolumesDeleted || []).length === 1 ? '' : 's'} — reclaimed ${fmt(d.SpaceReclaimed || 0)}`,
+    async () => { state.volumes = []; await loadVolumes(); loadDashboard(); }));
 
 // ─── Tray-driven events ───────────────────────────────────────────────────────
 api.onRefresh(() => loadDashboard());

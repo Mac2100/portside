@@ -16,7 +16,13 @@ contextBridge.exposeInMainWorld('portside', {
     networks:   (args) => ipcRenderer.invoke('docker:networks', args),
     df:         (args) => ipcRenderer.invoke('docker:df', args),
     inspect:    (args) => ipcRenderer.invoke('docker:inspect', args),
-    pruneImages:(args) => ipcRenderer.invoke('docker:prune-images', args)
+    pruneImages:     (args) => ipcRenderer.invoke('docker:prune-images', args),
+    pruneContainers: (args) => ipcRenderer.invoke('docker:prune-containers', args),
+    pruneVolumes:    (args) => ipcRenderer.invoke('docker:prune-volumes', args),
+    recreate:        (args) => ipcRenderer.invoke('docker:recreate', args)
+  },
+  github: {
+    latestRelease: (args) => ipcRenderer.invoke('github:latest-release', args)
   },
   dockBadge: (n) => ipcRenderer.send('dock:badge', n),
   appx: {
