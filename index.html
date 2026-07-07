@@ -1500,11 +1500,30 @@
 
         <div class="settings-card">
           <div class="settings-card-title">🐙 GitHub Watch</div>
-          <div class="form-hint" style="margin-top:-4px;margin-bottom:12px">Watches <b>source-code repos</b> for new commits and releases. <b>Any repo you configure in Git Deploy is watched and linked to its container automatically</b> — no need to add it here. On a push you get a one-click <b>Deploy</b>; turn on <b>Auto</b> and it deploys itself. Checked on the same schedule as Image Updates. Private repos use your Git Deploy token. The box below is only for extra repos you want to watch without deploying (e.g. upstream projects).</div>
+          <div class="form-hint" style="margin-top:-4px;margin-bottom:12px">Watches <b>source-code repos</b> for new commits and releases. <b>Any repo you configure in Git Deploy is watched and linked to its container automatically</b> — no need to add it here. Runs on its own schedule, independent of Image Updates. Private repos use your Git Deploy token. The box below is only for extra repos you want to watch without deploying (e.g. upstream projects).</div>
           <div class="switch-row" style="margin-bottom:12px">
             <input type="checkbox" id="setting-gh-enabled" checked>
             <label for="setting-gh-enabled" style="font-size:13px;cursor:pointer;font-weight:600">Enable GitHub watch</label>
           </div>
+          <div style="display:flex;gap:14px;flex-wrap:wrap;margin-bottom:14px">
+            <div style="flex:1;min-width:180px">
+              <label class="form-label">Check repos</label>
+              <select class="form-input" id="setting-gh-interval" style="cursor:pointer">
+                <option value="120000">Every 2 minutes</option>
+                <option value="300000">Every 5 minutes</option>
+                <option value="600000">Every 10 minutes</option>
+                <option value="900000" selected>Every 15 minutes</option>
+                <option value="1800000">Every 30 minutes</option>
+                <option value="3600000">Every hour</option>
+                <option value="0">Never (manual only)</option>
+              </select>
+            </div>
+            <div style="flex:0 0 170px">
+              <label class="form-label">Nightly deploys run at</label>
+              <input class="form-input" type="time" id="setting-gh-deploytime" value="03:00" style="cursor:pointer">
+            </div>
+          </div>
+          <div class="form-hint" style="margin-top:-6px;margin-bottom:10px">Per repo, pick how a push is handled: <b>Notify</b> = alert + one-click Deploy · <b>Auto</b> = deploy immediately · <b>Nightly</b> = queue it and deploy at the time above (for production apps). Portside must be running (menu bar is enough) and the Mac awake at that time.</div>
           <div id="ghwatch-list" style="margin-bottom:8px"></div>
           <div style="display:flex;gap:6px;flex-wrap:wrap">
             <input class="form-input" id="ghwatch-repo" placeholder="watch an extra repo:  owner/repo" spellcheck="false" style="flex:1;min-width:200px">
@@ -2251,7 +2270,14 @@ async function checkGhReleases(announce) {
   state.ghNew = found;
   const fresh = found.filter(g => !prevNew.has(g.repo + '@' + g.what));
   if (fresh.length && state.config.updNotify !== false) {
-    try { new Notification('Portside', { body: fresh.map(g => g.kind === 'commit' ? `New commits on ${g.repo} (${g.what})` : `New release: ${g.repo} ${g.tag}`).join('\n') }); } catch {}
+    const line = (g) => {
+      const base = g.kind === 'commit' ? `New commits on ${g.repo} (${g.what})` : `New release: ${g.repo} ${g.tag}`;
+      const mode = ghModeFor(g.repo);
+      if (mode === 'scheduled' && ghCfgFor(g.repo).container) return `${base} — deploys tonight at ${ghDeployTime()}`;
+      if (mode === 'auto' && ghCfgFor(g.repo).container) return `${base} — deploying now`;
+      return base;
+    };
+    try { new Notification('Portside', { body: fresh.map(line).join('\n') }); } catch {}
   }
   if (typeof renderGhWatchList === 'function' && $('page-settings').classList.contains('active')) renderGhWatchList();
   renderInsights(state.lastPer || []);
@@ -2273,6 +2299,12 @@ function setGhCfg(repo, patch) {
   all[repo] = { ...(all[repo] || {}), ...patch };
   saveCfg({ ghWatchCfg: all });
 }
+// Deploy mode: 'notify' (alert + button) · 'auto' (deploy immediately) · 'scheduled' (nightly window)
+function ghModeFor(repo) {
+  const cfg = ghCfgFor(repo);
+  return cfg.mode || (cfg.autoDeploy ? 'auto' : 'notify'); // migrate old autoDeploy flag
+}
+function ghDeployTime() { return state.config.ghDeployTime || '03:00'; }
 function repoFromUrl(url) {
   const m = /github\.com\/([\w.-]+\/[\w.-]+?)(?:\.git)?(?:\/|$)/i.exec(String(url || ''));
   return m ? m[1] : null;
@@ -2300,16 +2332,14 @@ async function ghDeploy(repo, btn) {
   return true;
 }
 
-// Auto-deploy: pushes to repos with the Auto toggle get deployed hands-free.
+// Auto mode: pushes get deployed hands-free, immediately.
 // Each new commit/release is attempted ONCE — failures wait for your input
 // (or the next push) instead of retrying every check.
 async function ghAutoDeploy(found) {
   if (state._ghDeploying) return;
   state._ghAutoTried = state._ghAutoTried || {};
-  const jobs = (found || []).filter(g => {
-    const cfg = ghCfgFor(g.repo);
-    return cfg.autoDeploy && cfg.container && state._ghAutoTried[g.repo] !== g.what;
-  });
+  const jobs = (found || []).filter(g =>
+    ghModeFor(g.repo) === 'auto' && ghCfgFor(g.repo).container && state._ghAutoTried[g.repo] !== g.what);
   if (!jobs.length) return;
   state._ghDeploying = true;
   try {
@@ -2321,13 +2351,45 @@ async function ghAutoDeploy(found) {
   } finally { state._ghDeploying = false; }
 }
 
-// ─── Update check scheduling (registry + GitHub on the same clock) ────────────
-let updTimer = null;
+// Nightly mode: queued pushes deploy at the configured time. A 10-minute grace
+// window covers sleep/wake jitter; pushes that land AFTER the window wait for
+// the next night. Runs at most once per day.
+setInterval(ghScheduledTick, 30000);
+async function ghScheduledTick() {
+  if (state.config.ghEnabled === false || state._ghDeploying) return;
+  const queued = (state.ghNew || []).filter(g => {
+    const cfg = ghCfgFor(g.repo);
+    return ghModeFor(g.repo) === 'scheduled' && cfg.container &&
+      (state._ghAutoTried || {})[g.repo] !== g.what;
+  });
+  if (!queued.length) return;
+  const [hh, mm] = ghDeployTime().split(':').map(Number);
+  const now = new Date();
+  const target = new Date(now); target.setHours(hh || 0, mm || 0, 0, 0);
+  const todayKey = now.toDateString();
+  if (state._ghNightlyRan === todayKey) return;
+  if (now < target || now - target > 10 * 60e3) return; // outside tonight's window
+  state._ghNightlyRan = todayKey;
+  state._ghAutoTried = state._ghAutoTried || {};
+  state._ghDeploying = true;
+  try {
+    toast(`Nightly deploy window — deploying ${queued.length} app${queued.length > 1 ? 's' : ''}…`, 'info', 8000);
+    for (const g of queued) {
+      state._ghAutoTried[g.repo] = g.what;
+      await ghDeploy(g.repo);
+    }
+  } finally { state._ghDeploying = false; }
+}
+
+// ─── Update check scheduling — independent clocks for images and GitHub ───────
+let updTimer = null, ghTimer = null;
 function scheduleUpdateChecks() {
   if (updTimer) clearInterval(updTimer);
-  const iv = state.config.updInterval !== undefined ? +state.config.updInterval : 3600e3; // default: hourly
-  if (!iv) return; // manual only
-  updTimer = setInterval(() => { checkUpdates(true); checkGhReleases(); }, iv);
+  if (ghTimer) clearInterval(ghTimer);
+  const imgIv = state.config.updInterval !== undefined ? +state.config.updInterval : 3600e3; // default: hourly
+  if (imgIv) updTimer = setInterval(() => checkUpdates(true), imgIv);
+  const ghIv = state.config.ghInterval !== undefined ? +state.config.ghInterval : 900e3;     // default: 15 min
+  if (ghIv) ghTimer = setInterval(() => checkGhReleases(), ghIv);
 }
 
 function showPage(name) {
@@ -2781,10 +2843,14 @@ function computeInsights(per) {
 
   (state.ghNew || []).forEach(g => {
     const cfg = ghCfgFor(g.repo);
+    const mode = ghModeFor(g.repo);
     const base = g.kind === 'commit' ? `latest: ${(g.msg || '').slice(0, 70)}` : `${g.tag}${g.name && g.name !== g.tag ? ' · ' + g.name : ''}`;
-    add({ key: 'gh-' + g.repo, section: 'updates', sev: 'warn', icon: '🐙',
+    const tail = !cfg.container ? ''
+      : mode === 'scheduled' ? ` · 🌙 queued — ${cfg.container} deploys at ${ghDeployTime()} (or Deploy now)`
+      : ` · Deploy pulls it onto the NAS and restarts ${cfg.container}`;
+    add({ key: 'gh-' + g.repo, section: 'updates', sev: 'warn', icon: mode === 'scheduled' ? '🌙' : '🐙',
       title: `${g.kind === 'commit' ? 'New commits' : 'New release'} — ${g.repo}`,
-      sub: cfg.container ? `${base} · Deploy pulls it onto the NAS and restarts ${cfg.container}` : base,
+      sub: base + tail,
       value: '',
       chips: cfg.container ? [{ label: cfg.container, cls: '', cid: (state.containers.find(x => sanitizeName(x.Names && x.Names[0]) === cfg.container) || {}).Id }] : [],
       actions: (cfg.container ? `<button class="btn btn-warn" data-act="gh-deploy" data-repo="${escHtml(g.repo)}">⬆ Deploy</button>` : '') +
@@ -4502,6 +4568,8 @@ function renderUpdSettings() {
   $('setting-upd-enabled').checked = state.config.updEnabled !== false;
   $('setting-gh-enabled').checked = state.config.ghEnabled !== false;
   $('setting-upd-interval').value = String(state.config.updInterval !== undefined ? state.config.updInterval : 3600000);
+  $('setting-gh-interval').value = String(state.config.ghInterval !== undefined ? state.config.ghInterval : 900000);
+  $('setting-gh-deploytime').value = ghDeployTime();
   $('setting-upd-notify').checked = state.config.updNotify !== false;
 
   const auto = state.config.autoUpdate || {};
@@ -4540,7 +4608,11 @@ function renderGhWatchList() {
           <span class="gw-repo" title="${escHtml(repo)}">${escHtml(repo)}</span>
           ${bits ? `<span class="gw-tag">${isNew ? '🆕 ' : ''}${escHtml(bits)}</span>` : ''}
           <select class="form-input gw-link" data-gw-link="${escHtml(repo)}" title="Container to deploy when this repo changes" style="flex:0 0 150px;padding:4px 8px;font-size:12px">${opts}</select>
-          <label class="gw-auto" title="Auto-deploy on new commits/releases — no clicks needed"><input type="checkbox" data-gw-auto="${escHtml(repo)}"${cfg.autoDeploy ? ' checked' : ''}${cfg.container ? '' : ' disabled'}> Auto</label>
+          <select class="form-input gw-mode" data-gw-mode="${escHtml(repo)}" title="Notify: alert + one-click Deploy · Auto: deploy immediately · Nightly: deploy at the scheduled time" style="flex:0 0 108px;padding:4px 8px;font-size:12px"${cfg.container ? '' : ' disabled'}>
+            <option value="notify"${ghModeFor(repo) === 'notify' ? ' selected' : ''}>🔔 Notify</option>
+            <option value="auto"${ghModeFor(repo) === 'auto' ? ' selected' : ''}>⚡ Auto</option>
+            <option value="scheduled"${ghModeFor(repo) === 'scheduled' ? ' selected' : ''}>🌙 Nightly</option>
+          </select>
           <button class="btn btn-icon" data-gw-remove="${escHtml(repo)}" title="Stop watching">✕</button>
         </div>`;
       }).join('')
@@ -4549,14 +4621,22 @@ function renderGhWatchList() {
   $('ghwatch-list').querySelectorAll('[data-gw-link]').forEach(sel =>
     sel.addEventListener('change', () => {
       const repo = sel.dataset.gwLink;
-      setGhCfg(repo, { container: sel.value || null, ...(sel.value ? {} : { autoDeploy: false }) });
+      setGhCfg(repo, { container: sel.value || null, ...(sel.value ? {} : { mode: 'notify', autoDeploy: false }) });
       renderGhWatchList();
       renderInsights(state.lastPer || []);
     }));
-  $('ghwatch-list').querySelectorAll('[data-gw-auto]').forEach(cb =>
-    cb.addEventListener('change', () => {
-      setGhCfg(cb.dataset.gwAuto, { autoDeploy: cb.checked });
-      if (cb.checked) toast(`Auto-deploy on: pushes to ${cb.dataset.gwAuto} deploy ${ghCfgFor(cb.dataset.gwAuto).container} automatically`, 'info', 6000);
+  $('ghwatch-list').querySelectorAll('[data-gw-mode]').forEach(sel =>
+    sel.addEventListener('change', () => {
+      const repo = sel.dataset.gwMode;
+      setGhCfg(repo, { mode: sel.value, autoDeploy: sel.value === 'auto' });
+      const c = ghCfgFor(repo).container;
+      const msg = {
+        notify: `Pushes to ${repo}: you'll be notified with a one-click Deploy`,
+        auto: `Pushes to ${repo}: ${c} deploys immediately, hands-free`,
+        scheduled: `Pushes to ${repo}: queued, ${c} deploys at ${ghDeployTime()} `
+      }[sel.value];
+      toast(msg, 'info', 6000);
+      renderInsights(state.lastPer || []);
     }));
   $('ghwatch-list').querySelectorAll('[data-gw-remove]').forEach(b =>
     b.addEventListener('click', () => {
@@ -4578,7 +4658,21 @@ function renderGhWatchList() {
 $('setting-upd-interval').addEventListener('change', (e) => {
   saveCfg({ updInterval: +e.target.value });
   scheduleUpdateChecks();
-  toast(+e.target.value ? 'Update checks scheduled' : 'Automatic update checks off — use the button on Insights', 'info', 4000);
+  toast(+e.target.value ? 'Image update checks scheduled' : 'Automatic image checks off — use Check now', 'info', 4000);
+});
+
+$('setting-gh-interval').addEventListener('change', (e) => {
+  saveCfg({ ghInterval: +e.target.value });
+  scheduleUpdateChecks();
+  toast(+e.target.value ? `GitHub repos checked every ${Math.round(+e.target.value / 60000)} min` : 'Automatic GitHub checks off — use Check now', 'info', 4500);
+});
+
+$('setting-gh-deploytime').addEventListener('change', (e) => {
+  if (!/^\d{2}:\d{2}$/.test(e.target.value)) return;
+  saveCfg({ ghDeployTime: e.target.value });
+  state._ghNightlyRan = null; // allow tonight's new window
+  toast(`Nightly deploys will run at ${e.target.value}`, 'info', 4500);
+  renderInsights(state.lastPer || []);
 });
 
 $('setting-upd-notify').addEventListener('change', (e) => {
