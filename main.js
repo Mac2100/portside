@@ -1389,28 +1389,58 @@ ipcMain.handle('docker:recreate', async (_, { host, port, id, spec }) => {
   }
 });
 
-// ─── GitHub release watching (for update notifications) ──────────────────────
+// ─── GitHub watching: latest release AND latest default-branch commit ─────────
+// Uses the saved Git Deploy token when present (private repos + a much higher
+// rate limit, which matters for short check intervals).
 ipcMain.handle('github:latest-release', async (_, { repo }) => {
   try {
     const clean = String(repo || '').trim()
       .replace(/^https?:\/\/(www\.)?github\.com\//i, '').replace(/\.git$/, '').replace(/\/+$/, '');
-    if (!/^[\w.-]+\/[\w.-]+$/.test(clean)) return { ok: false, error: 'Use the owner/repo form, e.g. linuxserver/docker-radarr' };
-    const r = await regRequest('GET', `https://api.github.com/repos/${clean}/releases/latest`, {
-      'User-Agent': 'Portside-App', 'Accept': 'application/vnd.github+json'
-    });
-    if (r.status === 404) {
-      // Repos without releases: fall back to tags
-      const tr = await regRequest('GET', `https://api.github.com/repos/${clean}/tags?per_page=1`, {
-        'User-Agent': 'Portside-App', 'Accept': 'application/vnd.github+json'
-      });
-      if (tr.status !== 200) return { ok: false, error: 'No releases or tags found' };
-      const tags = JSON.parse(tr.body || '[]');
-      if (!tags.length) return { ok: false, error: 'No releases or tags found' };
-      return { ok: true, repo: clean, tag: tags[0].name, name: tags[0].name, url: `https://github.com/${clean}/tags`, publishedAt: null };
+    if (!/^[\w.-]+\/[\w.-]+$/.test(clean)) return { ok: false, error: 'Use the owner/repo form, e.g. Mac2100/SignPro' };
+    const headers = { 'User-Agent': 'Portside-App', 'Accept': 'application/vnd.github+json' };
+    const tok = getGitToken();
+    if (tok) headers['Authorization'] = 'Bearer ' + tok;
+
+    const out = { ok: true, repo: clean, tag: '', name: '', url: `https://github.com/${clean}/releases`, publishedAt: null, commit: null };
+
+    // Latest release (or tag as fallback) — optional, many repos have none
+    const r = await regRequest('GET', `https://api.github.com/repos/${clean}/releases/latest`, headers);
+    if (r.status === 200) {
+      const rel = JSON.parse(r.body);
+      out.tag = rel.tag_name || '';
+      out.name = rel.name || rel.tag_name || '';
+      out.url = rel.html_url || out.url;
+      out.publishedAt = rel.published_at || null;
+    } else if (r.status === 404) {
+      const tr = await regRequest('GET', `https://api.github.com/repos/${clean}/tags?per_page=1`, headers);
+      if (tr.status === 200) {
+        const tags = JSON.parse(tr.body || '[]');
+        if (tags.length) { out.tag = tags[0].name; out.name = tags[0].name; out.url = `https://github.com/${clean}/tags`; }
+      }
+    } else if (r.status === 401 || r.status === 403) {
+      return { ok: false, error: 'GitHub HTTP ' + r.status + (tok ? '' : ' — add a token in Settings → Git Deploy for private repos / higher rate limits') };
     }
-    if (r.status !== 200) return { ok: false, error: 'GitHub HTTP ' + r.status };
-    const rel = JSON.parse(r.body);
-    return { ok: true, repo: clean, tag: rel.tag_name || '', name: rel.name || rel.tag_name || '', url: rel.html_url || `https://github.com/${clean}/releases`, publishedAt: rel.published_at || null };
+
+    // Latest commit on the default branch
+    const cr = await regRequest('GET', `https://api.github.com/repos/${clean}/commits?per_page=1`, headers);
+    if (cr.status === 200) {
+      const commits = JSON.parse(cr.body || '[]');
+      if (commits.length) {
+        const c = commits[0];
+        out.commit = {
+          sha: c.sha,
+          shortSha: (c.sha || '').slice(0, 7),
+          msg: ((c.commit && c.commit.message) || '').split('\n')[0],
+          date: (c.commit && (c.commit.committer || c.commit.author || {}).date) || null,
+          url: c.html_url || `https://github.com/${clean}/commits`
+        };
+      }
+    } else if (cr.status === 404 && !out.tag) {
+      return { ok: false, error: 'Repo not found (or private — add a token in Settings → Git Deploy)' };
+    }
+
+    if (!out.tag && !out.commit) return { ok: false, error: 'No releases, tags or commits found' };
+    return out;
   } catch (e) { return { ok: false, error: e.message }; }
 });
 

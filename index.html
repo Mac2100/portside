@@ -962,6 +962,13 @@
   .group-header .gh-arrow { font-size: 10px; transition: transform .15s; }
   .group-header.collapsed .gh-arrow { transform: rotate(-90deg); }
   .group-header .gh-count { font-size: 11px; font-weight: 600; background: var(--bg2); border-radius: 10px; padding: 1px 8px; }
+  .group-header .gh-actions { margin-left: auto; display: none; gap: 4px; }
+  .group-header:hover .gh-actions { display: inline-flex; }
+  .gh-btn {
+    border: 1px solid var(--border); background: var(--bg2); color: var(--text-muted);
+    width: 24px; height: 22px; border-radius: 6px; cursor: pointer; font-size: 11px; line-height: 1;
+  }
+  .gh-btn:hover { color: var(--text); border-color: var(--accent); }
   .group-section.collapsed .group-body { display: none; }
 
   /* List view rows reuse .container-table; slightly denser */
@@ -977,6 +984,48 @@
   }
   .ghwatch-row .gw-repo { font-family: 'SF Mono', monospace; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .ghwatch-row .gw-tag { font-size: 11px; color: var(--text-muted); }
+
+  /* ── Insights v2 ─────────────────────────────────────────────── */
+  .ins-sec { margin-bottom: 26px; }
+  .ins-sec-title {
+    display: flex; align-items: center; gap: 8px;
+    font-size: 13px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
+    color: var(--text-muted); margin-bottom: 10px; padding-bottom: 6px;
+    border-bottom: 1px solid var(--border);
+  }
+  .ins-sec-count { font-size: 11px; font-weight: 600; background: var(--bg2); border-radius: 10px; padding: 1px 8px; }
+  .ins-item {
+    display: flex; align-items: center; gap: 14px;
+    padding: 13px 16px; margin-bottom: 8px;
+    border-radius: 12px; border: 1px solid var(--border);
+    border-left-width: 4px; border-left-color: var(--text-muted);
+    background: linear-gradient(180deg, #1d232e 0%, #171c24 100%);
+    box-shadow: 0 2px 10px rgba(0,0,0,0.22), inset 0 1px 0 rgba(255,255,255,0.04);
+    transition: opacity .3s, border-color .15s, background .15s;
+  }
+  .ins-item.sev-crit { border-left-color: #f85149; }
+  .ins-item.sev-warn { border-left-color: #d29922; }
+  .ins-item.sev-info { border-left-color: #58a6ff; }
+  .ins-item.sev-good { border-left-color: #3fb950; }
+  .ins-item.sev-none { border-left-color: var(--border); }
+  .ins-item.easing { opacity: .5; }
+  .ins-item.clickable { cursor: pointer; }
+  .ins-item.clickable:hover { border-color: var(--accent); border-left-width: 4px; background: var(--bg2); }
+  .ins-icon {
+    width: 36px; height: 36px; border-radius: 10px; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 17px; background: var(--bg2);
+  }
+  .ins-item.sev-crit .ins-icon { background: rgba(248,81,73,0.15); }
+  .ins-item.sev-warn .ins-icon { background: rgba(210,153,34,0.15); }
+  .ins-item.sev-info .ins-icon { background: rgba(88,166,255,0.12); }
+  .ins-item.sev-good .ins-icon { background: rgba(63,185,80,0.15); }
+  .ins-body { min-width: 0; flex: 1; }
+  .ins-title { font-size: 14px; font-weight: 650; line-height: 1.3; }
+  .ins-sub { font-size: 12px; color: var(--text-muted); margin-top: 2px; line-height: 1.45; }
+  .ins-value { font-size: 15px; font-weight: 700; flex-shrink: 0; font-variant-numeric: tabular-nums; }
+  .ins-act { flex-shrink: 0; display: flex; gap: 6px; }
+  :root[data-theme="light"] .ins-item { background: #ffffff; }
 </style>
 <link rel="stylesheet" href="node_modules/@xterm/xterm/css/xterm.css">
 </head>
@@ -1208,7 +1257,6 @@
           <button class="btn btn-success" id="deploy-btn">+ Deploy</button>
           <button class="btn" id="compose-btn">⬇ Import YAML</button>
           <button class="btn" id="containers-show-all-btn">Running Only</button>
-          <button class="btn btn-warn" id="containers-prune-btn" title="Remove all stopped containers">🧹 Prune stopped</button>
           <button class="btn btn-primary" id="containers-refresh-btn">↻ Refresh</button>
         </div>
       </div>
@@ -1402,24 +1450,32 @@
 
         <div class="settings-card">
           <div class="settings-card-title">🔄 Container Updates</div>
+          <div class="form-hint" style="margin-top:-4px;margin-bottom:12px">One check does everything: image registries (Docker Hub, GHCR, …) <b>and</b> your watched GitHub repos.</div>
           <div class="form-group">
-            <label class="form-label">Check registries for image updates</label>
-            <select class="form-input" id="setting-upd-interval" style="cursor:pointer">
-              <option value="0">Manually only</option>
-              <option value="21600000" selected>Every 6 hours</option>
-              <option value="43200000">Every 12 hours</option>
-              <option value="86400000">Once a day</option>
-            </select>
+            <label class="form-label">Check automatically</label>
+            <div style="display:flex;gap:8px">
+              <select class="form-input" id="setting-upd-interval" style="cursor:pointer;flex:1">
+                <option value="900000">Every 15 minutes</option>
+                <option value="1800000">Every 30 minutes</option>
+                <option value="3600000" selected>Every hour</option>
+                <option value="10800000">Every 3 hours</option>
+                <option value="21600000">Every 6 hours</option>
+                <option value="43200000">Every 12 hours</option>
+                <option value="86400000">Once a day</option>
+                <option value="0">Never (manual only)</option>
+              </select>
+              <button class="btn btn-primary" id="upd-check-now-btn">Check now</button>
+            </div>
           </div>
-          <div class="switch-row" style="margin-bottom:12px">
+          <div class="switch-row" style="margin-bottom:14px">
             <input type="checkbox" id="setting-upd-notify" checked>
-            <label for="setting-upd-notify" style="font-size:13px;cursor:pointer">Notify me when an image update is found</label>
+            <label for="setting-upd-notify" style="font-size:13px;cursor:pointer">Send a notification when something new is found</label>
           </div>
-          <div class="form-label" style="margin-bottom:4px">Auto-update these containers when a new image is found</div>
-          <div class="form-hint" style="margin-top:0;margin-bottom:8px">Checked containers are pulled &amp; recreated automatically on the schedule above — only when the registry actually has something new. Everything else just shows an Insight.</div>
+          <div class="form-label" style="margin-bottom:4px">Auto-update containers</div>
+          <div class="form-hint" style="margin-top:0;margin-bottom:8px">Checked containers are pulled &amp; recreated automatically when a check finds a new image. Unchecked ones just show up under Insights → Updates.</div>
           <div id="upd-auto-list" style="max-height:220px;overflow-y:auto;margin-bottom:14px"></div>
-          <div class="form-label" style="margin-bottom:4px">Watch GitHub repos for new releases</div>
-          <div class="form-hint" style="margin-top:0;margin-bottom:8px">Get a notification and an Insight when a watched repo publishes a release (useful for apps you build yourself or track upstream).</div>
+          <div class="form-label" style="margin-bottom:4px">Watch GitHub repos</div>
+          <div class="form-hint" style="margin-top:0;margin-bottom:8px">Alerts on <b>new commits</b> to the default branch and on <b>new releases</b> — so a push to one of your app repos shows up on the next check. Private repos use your Git Deploy token automatically.</div>
           <div id="ghwatch-list" style="margin-bottom:8px"></div>
           <div style="display:flex;gap:6px">
             <input class="form-input" id="ghwatch-repo" placeholder="owner/repo  e.g. Mac2100/SignPro" spellcheck="false" style="flex:1">
@@ -2079,24 +2135,38 @@ async function autoApplyUpdates(avail) {
   } finally { state._autoUpdating = false; }
 }
 
-// ─── GitHub release watching ──────────────────────────────────────────────────
+// ─── GitHub watching (releases + commits on the default branch) ───────────────
+function ghSeenFor(repo) {
+  const s = (state.config.ghSeen || {})[repo];
+  if (!s) return {};
+  return typeof s === 'string' ? { tag: s } : s; // migrate old string form
+}
+
 async function checkGhReleases(announce) {
   const watch = state.config.ghWatch || [];
   if (!watch.length) { state.ghNew = []; return; }
-  const seen = state.config.ghSeen || {};
-  const prevNew = new Set((state.ghNew || []).map(g => g.repo + '@' + g.tag));
+  const prevNew = new Set((state.ghNew || []).map(g => g.repo + '@' + g.what));
   const found = [];
   state.ghLatest = state.ghLatest || {};
   for (const repo of watch) {
     const r = await api.github.latestRelease({ repo });
     if (!r.ok) { if (announce) toast(`${repo}: ${r.error}`, 'error', 6000); continue; }
     state.ghLatest[r.repo] = r;
-    if (r.tag && seen[r.repo] !== r.tag) found.push(r);
+    const seen = ghSeenFor(r.repo);
+    const markSeen = { tag: r.tag || seen.tag || '', sha: (r.commit && r.commit.sha) || seen.sha || '' };
+    if (r.tag && seen.tag && seen.tag !== r.tag) {
+      found.push({ repo: r.repo, kind: 'release', what: r.tag, tag: r.tag, name: r.name, url: r.url, markSeen });
+    } else if (r.commit && seen.sha && seen.sha !== r.commit.sha) {
+      found.push({ repo: r.repo, kind: 'commit', what: r.commit.shortSha, tag: r.commit.shortSha, name: '', msg: r.commit.msg, url: r.commit.url, markSeen });
+    } else if ((r.tag && !seen.tag) || (r.commit && !seen.sha)) {
+      // First sighting of this repo (or of a new data type): baseline it silently
+      saveCfg({ ghSeen: { ...(state.config.ghSeen || {}), [r.repo]: markSeen } });
+    }
   }
   state.ghNew = found;
-  const fresh = found.filter(g => !prevNew.has(g.repo + '@' + g.tag));
-  if (fresh.length && state.config.updNotify !== false && !announce) {
-    try { new Notification('Portside', { body: `New release: ${fresh.map(g => `${g.repo} ${g.tag}`).join(', ')}` }); } catch {}
+  const fresh = found.filter(g => !prevNew.has(g.repo + '@' + g.what));
+  if (fresh.length && state.config.updNotify !== false) {
+    try { new Notification('Portside', { body: fresh.map(g => g.kind === 'commit' ? `New commits on ${g.repo} (${g.what})` : `New release: ${g.repo} ${g.tag}`).join('\n') }); } catch {}
   }
   if (typeof renderGhWatchList === 'function' && $('page-settings').classList.contains('active')) renderGhWatchList();
   renderInsights(state.lastPer || []);
@@ -2105,9 +2175,8 @@ async function checkGhReleases(announce) {
 function markGhSeen(repo) {
   const g = (state.ghNew || []).find(x => x.repo === repo);
   if (!g) return;
-  saveCfg({ ghSeen: { ...(state.config.ghSeen || {}), [repo]: g.tag } });
+  saveCfg({ ghSeen: { ...(state.config.ghSeen || {}), [repo]: g.markSeen } });
   state.ghNew = state.ghNew.filter(x => x.repo !== repo);
-  state._insightsHtml = null;
   renderInsights(state.lastPer || []);
 }
 
@@ -2115,7 +2184,7 @@ function markGhSeen(repo) {
 let updTimer = null;
 function scheduleUpdateChecks() {
   if (updTimer) clearInterval(updTimer);
-  const iv = state.config.updInterval !== undefined ? +state.config.updInterval : 6 * 3600e3;
+  const iv = state.config.updInterval !== undefined ? +state.config.updInterval : 3600e3; // default: hourly
   if (!iv) return; // manual only
   updTimer = setInterval(() => { checkUpdates(true); checkGhReleases(); }, iv);
 }
@@ -2476,175 +2545,245 @@ function renderChart(id, hoverX) {
   }
 }
 
-// ─── Insights ─────────────────────────────────────────────────────────────────
-function renderInsights(per) {
+// ─── Insights (v2) ────────────────────────────────────────────────────────────
+// Rebuilt from scratch:
+//   • every insight has a STABLE KEY and is updated IN PLACE — no innerHTML wipes,
+//     so nothing flickers or vanishes under the cursor
+//   • clicks use event delegation on the container — they always work
+//   • short-lived conditions (CPU spikes, I/O hogs) are HELD on screen for 60s
+//     after they clear, dimmed, so you can actually read them
+//   • grouped into sections: Needs attention / Updates / Housekeeping / Status
+
+const INS_HOLD_MS = 60000;
+const INS_SECTIONS = [
+  ['attention', '⚠️ Needs attention'],
+  ['updates', '⬆️ Updates'],
+  ['housekeeping', '🧹 Housekeeping'],
+  ['status', '✅ Status']
+];
+
+function computeInsights(per) {
   const items = [];
   const name1 = c => sanitizeName(c.Names && c.Names[0]);
-  const sevRank = { crit: 0, warn: 1, good: 2, '': 3 };
+  const add = (o) => items.push(o);
 
-  // — Resource alerts —
+  // — Needs attention —
   per.filter(p => p.cpu > 80).forEach(p =>
-    items.push({ sev: 'crit', icon: '🔥', cid: p.id, title: `High CPU — ${p.name}`, sub: 'Sustained load; click to inspect', value: p.cpu.toFixed(1) + '%' }));
+    add({ key: 'cpu-' + p.id, section: 'attention', sev: 'crit', volatile: true, icon: '🔥', cid: p.id,
+      title: `High CPU — ${p.name}`, sub: 'Sustained load · click to inspect', value: p.cpu.toFixed(1) + '%' }));
   per.filter(p => p.memPct > 85).forEach(p =>
-    items.push({ sev: 'warn', icon: '🧠', cid: p.id, title: `High memory — ${p.name}`, sub: fmt(p.mem) + ' in use', value: p.memPct.toFixed(0) + '%' }));
+    add({ key: 'mem-' + p.id, section: 'attention', sev: 'warn', volatile: true, icon: '🧠', cid: p.id,
+      title: `High memory — ${p.name}`, sub: fmt(p.mem) + ' in use · click to inspect', value: p.memPct.toFixed(0) + '%' }));
 
-  // Host memory pressure
   const H = state.history;
   const hostMemNow = H.mem[H.mem.length - 1] || 0;
   if (hostMemNow > 88)
-    items.push({ sev: 'crit', icon: '🚨', title: 'Host memory pressure', sub: 'Container memory is squeezing the NAS — consider stopping something', value: hostMemNow.toFixed(0) + '%' });
+    add({ key: 'hostmem', section: 'attention', sev: 'crit', volatile: true, icon: '🚨',
+      title: 'Host memory pressure', sub: 'Container memory is squeezing the NAS — consider stopping something', value: hostMemNow.toFixed(0) + '%' });
 
-  // CPU trend over recent history
   if (H.cpu.length >= 12) {
     const recent = H.cpu.slice(-3).reduce((a, b) => a + b, 0) / 3;
     const earlier = H.cpu.slice(-12, -3).reduce((a, b) => a + b, 0) / 9;
     if (recent - earlier > 15)
-      items.push({ sev: 'warn', icon: '📈', title: 'CPU climbing', sub: `Up from ~${earlier.toFixed(0)}% to ~${recent.toFixed(0)}% over the last few minutes`, value: '' });
+      add({ key: 'cputrend', section: 'attention', sev: 'warn', volatile: true, icon: '📈',
+        title: 'CPU climbing', sub: `Up from ~${earlier.toFixed(0)}% to ~${recent.toFixed(0)}% over the last few minutes`, value: '' });
   }
 
-  // — Health & stability —
   state.containers.filter(c => /unhealthy/i.test(c.Status || '')).forEach(c =>
-    items.push({ sev: 'crit', icon: '⚠️', cid: c.Id, title: `Unhealthy — ${name1(c)}`, sub: c.Status, value: '' }));
+    add({ key: 'unhealthy-' + c.Id, section: 'attention', sev: 'crit', icon: '⚠️', cid: c.Id,
+      title: `Unhealthy — ${name1(c)}`, sub: c.Status || '', value: '' }));
   state.containers.filter(c => /restarting/i.test(c.State || '')).forEach(c =>
-    items.push({ sev: 'warn', icon: '♻️', cid: c.Id, title: `Restart loop — ${name1(c)}`, sub: c.Status, value: '' }));
-
-  // Crashed containers (non-zero exit codes)
+    add({ key: 'restarting-' + c.Id, section: 'attention', sev: 'warn', icon: '♻️', cid: c.Id,
+      title: `Restart loop — ${name1(c)}`, sub: c.Status || '', value: '' }));
   state.containers.forEach(c => {
     const m = /Exited \((\d+)\)/.exec(c.Status || '');
     if (m && m[1] !== '0')
-      items.push({ sev: 'warn', icon: '💥', cid: c.Id, title: `Crashed — ${name1(c)}`, sub: `${c.Status} • click for details`, value: 'exit ' + m[1] });
+      add({ key: 'crashed-' + c.Id, section: 'attention', sev: 'warn', icon: '💥', cid: c.Id,
+        title: `Crashed — ${name1(c)}`, sub: `${c.Status} · click for details`, value: 'exit ' + m[1] });
   });
-
-  // Restart counts + health summary from inspect cache
   const inspects = Object.entries(state.inspectCache);
   inspects.forEach(([id, x]) => {
     if ((x.RestartCount || 0) > 0) {
       const c = state.containers.find(k => k.Id === id);
-      items.push({ sev: 'warn', icon: '🔁', cid: id, title: `${c ? name1(c) : id.slice(0, 12)} has restarted ${x.RestartCount}×`, sub: 'Docker restarted it after exits — check its logs', value: '' });
+      add({ key: 'restarts-' + id, section: 'attention', sev: 'warn', icon: '🔁', cid: id,
+        title: `${c ? name1(c) : id.slice(0, 12)} has restarted ${x.RestartCount}×`, sub: 'Docker restarted it after exits — check its logs', value: '' });
     }
   });
+
+  // Transient hogs (held on screen after they pass — see INS_HOLD_MS)
+  const byNet = [...per].sort((a, b) => b.netRate - a.netRate);
+  if (byNet[0] && byNet[0].netRate > 50 * 1024)
+    add({ key: 'nethog', section: 'attention', sev: 'info', volatile: true, icon: '🌐', cid: byNet[0].id,
+      title: `Network hog — ${byNet[0].name}`, sub: 'Heaviest network traffic right now', value: fmt(byNet[0].netRate) + '/s' });
+  const byBlk = [...per].sort((a, b) => b.blkRate - a.blkRate);
+  if (byBlk[0] && byBlk[0].blkRate > 512 * 1024)
+    add({ key: 'diskhog', section: 'attention', sev: 'info', volatile: true, icon: '💿', cid: byBlk[0].id,
+      title: `Disk hog — ${byBlk[0].name}`, sub: 'Heaviest disk I/O right now', value: fmt(byBlk[0].blkRate) + '/s' });
+
+  // — Updates —
+  if (state.appUpdate && state.appUpdate.newer)
+    add({ key: 'app-update', section: 'updates', sev: 'info', icon: '🎁',
+      title: `Portside v${state.appUpdate.latest} is out`, sub: `You're on v${state.appUpdate.current}`, value: '',
+      actions: `<button class="btn btn-primary" data-act="app-upd">Get update</button>` });
+
+  ((state.updates && state.updates.results) || []).filter(u => u.updateAvailable).forEach(u =>
+    add({ key: 'img-' + u.image, section: 'updates', sev: 'warn', icon: '⬆️',
+      title: `Image update — ${u.shortName}`,
+      sub: `${u.image} · used by ${u.containers.map(c => c.name).join(', ')}`, value: '',
+      actions: `<button class="btn btn-warn" data-act="upd" data-img="${escHtml(u.image)}">Update</button>` }));
+
+  (state.ghNew || []).forEach(g =>
+    add({ key: 'gh-' + g.repo, section: 'updates', sev: 'warn', icon: '🐙',
+      title: `${g.kind === 'commit' ? 'New commits' : 'New release'} — ${g.repo}`,
+      sub: g.kind === 'commit' ? `latest: ${(g.msg || '').slice(0, 70)}` : `${g.tag}${g.name && g.name !== g.tag ? ' · ' + g.name : ''}`,
+      value: '',
+      actions: `<button class="btn" data-act="gh-view" data-url="${escHtml(g.url)}">View</button><button class="btn" data-act="gh-seen" data-repo="${escHtml(g.repo)}" title="Mark as seen">✓</button>` }));
+
+  // — Housekeeping —
+  const exited = state.containers.filter(c => (c.State || '').toLowerCase() === 'exited');
+  if (exited.length)
+    add({ key: 'stopped', section: 'housekeeping', sev: 'info', icon: '💤',
+      title: `${exited.length} stopped container${exited.length > 1 ? 's' : ''}`,
+      sub: exited.slice(0, 4).map(name1).join(', ') + (exited.length > 4 ? '…' : ''), value: '',
+      actions: `<button class="btn btn-warn" data-act="prune-stopped">Remove all</button>` });
+
+  if (state.df) {
+    const dangling = (state.df.Images || []).filter(i => !(i.RepoTags || []).length || i.RepoTags[0] === '<none>:<none>');
+    if (dangling.length) {
+      const reclaim = dangling.reduce((a, i) => a + (i.Size || 0), 0);
+      add({ key: 'dangling', section: 'housekeeping', sev: 'warn', icon: '🧹',
+        title: `${dangling.length} dangling image${dangling.length > 1 ? 's' : ''}`, sub: `~${fmt(reclaim)} reclaimable`, value: '',
+        actions: `<button class="btn btn-warn" data-act="prune-imgs">Prune</button>` });
+    }
+    const volsArr = state.df.Volumes || [];
+    const unusedVols = volsArr.filter(v => (v.UsageData && v.UsageData.RefCount === 0));
+    if (unusedVols.length) {
+      const sz = unusedVols.reduce((a, v) => a + ((v.UsageData && v.UsageData.Size > 0) ? v.UsageData.Size : 0), 0);
+      add({ key: 'unusedvols', section: 'housekeeping', sev: 'info', icon: '🗃️',
+        title: `${unusedVols.length} unused volume${unusedVols.length > 1 ? 's' : ''}`,
+        sub: `Not attached to any container${sz > 0 ? ' · ~' + fmt(sz) : ''} · ⚠ pruning deletes their data`, value: '',
+        actions: `<button class="btn btn-warn" data-act="prune-vols">Prune</button>` });
+    }
+    const layers = state.df.LayersSize || 0;
+    const vols = volsArr.reduce((a, v) => a + ((v.UsageData && v.UsageData.Size > 0) ? v.UsageData.Size : 0), 0);
+    add({ key: 'storage', section: 'status', sev: 'none', icon: '💾',
+      title: 'Storage', sub: `Images ${fmt(layers)} · Volumes ${fmt(vols)}`, value: '' });
+  }
+
+  // — Status —
   const withHealth = inspects.filter(([, x]) => x.State && x.State.Health);
   if (withHealth.length) {
     const healthy = withHealth.filter(([, x]) => x.State.Health.Status === 'healthy').length;
     const starting = withHealth.filter(([, x]) => x.State.Health.Status === 'starting').length;
-    items.push({
-      sev: healthy === withHealth.length ? 'good' : '',
-      icon: '🩺', title: `Health checks: ${healthy}/${withHealth.length} passing`,
-      sub: starting ? `${starting} still starting up` : 'All defined health checks reporting',
-      value: ''
-    });
+    add({ key: 'health-summary', section: 'status', sev: healthy === withHealth.length ? 'good' : 'none', icon: '🩺',
+      title: `Health checks: ${healthy}/${withHealth.length} passing`,
+      sub: starting ? `${starting} still starting up` : 'All defined health checks reporting', value: '' });
   }
 
-  // — Activity —
-  const byNet = [...per].sort((a, b) => b.netRate - a.netRate);
-  if (byNet[0] && byNet[0].netRate > 50 * 1024)
-    items.push({ sev: '', icon: '🌐', cid: byNet[0].id, title: `Network hog — ${byNet[0].name}`, sub: 'Heaviest network traffic right now', value: fmt(byNet[0].netRate) + '/s' });
-  const byBlk = [...per].sort((a, b) => b.blkRate - a.blkRate);
-  if (byBlk[0] && byBlk[0].blkRate > 512 * 1024)
-    items.push({ sev: '', icon: '💿', cid: byBlk[0].id, title: `Disk hog — ${byBlk[0].name}`, sub: 'Heaviest disk I/O right now', value: fmt(byBlk[0].blkRate) + '/s' });
+  return items;
+}
 
-  // Stopped containers
-  const exited = state.containers.filter(c => (c.State || '').toLowerCase() === 'exited');
-  if (exited.length)
-    items.push({ sev: '', icon: '💤', title: `${exited.length} stopped container${exited.length > 1 ? 's' : ''}`, sub: exited.slice(0, 4).map(name1).join(', ') + (exited.length > 4 ? '…' : ''), value: '' });
+function renderInsights(per) {
+  let items = computeInsights(per || []);
 
-  // — Portside itself has an update —
-  if (state.appUpdate && state.appUpdate.newer) {
-    items.push({
-      sev: '', icon: '🎁',
-      title: `Portside v${state.appUpdate.latest} is out`,
-      sub: `You're on v${state.appUpdate.current} — grab the new DMG from GitHub`,
-      value: '', action: '<button class="btn btn-primary" id="app-upd-btn">Get update</button>'
-    });
+  // Hysteresis: keep volatile items visible (dimmed) for a while after they clear
+  const now = Date.now();
+  state.insHold = state.insHold || {};
+  for (const i of items) if (i.volatile) state.insHold[i.key] = { item: i, until: now + INS_HOLD_MS };
+  for (const [k, h] of Object.entries(state.insHold)) {
+    if (h.until < now) { delete state.insHold[k]; continue; }
+    if (!items.some(i => i.key === k)) items.push({ ...h.item, easing: true, sub: h.item.sub + ' · settled — clearing soon' });
   }
 
-  // — Image updates —
-  if (state.updates && state.updates.results) {
-    state.updates.results.filter(u => u.updateAvailable).forEach(u =>
-      items.push({
-        sev: 'warn', icon: '⬆️',
-        title: `Update available — ${u.shortName}`,
-        sub: `${u.image} • used by ${u.containers.map(c => c.name).join(', ')}`,
-        value: '',
-        action: `<button class="btn btn-warn upd-btn" data-img="${u.image}">Update</button>`
-      }));
-  }
-
-  // — Watched GitHub repos with a new release —
-  (state.ghNew || []).forEach(g =>
-    items.push({
-      sev: 'warn', icon: '🐙',
-      title: `New release — ${g.repo}`,
-      sub: `${g.tag}${g.name && g.name !== g.tag ? ' · ' + g.name : ''}`,
-      value: '',
-      action: `<button class="btn gh-rel-btn" data-repo="${g.repo}" data-url="${g.url}">View</button><button class="btn gh-seen-btn" data-repo="${g.repo}" title="Mark as seen">✓</button>`
-    }));
-
-  // — Storage —
-  if (state.df) {
-    const layers = state.df.LayersSize || 0;
-    const volsArr = state.df.Volumes || [];
-    const vols = volsArr.reduce((a, v) => a + ((v.UsageData && v.UsageData.Size > 0) ? v.UsageData.Size : 0), 0);
-    items.push({ sev: '', icon: '💾', title: 'Storage', sub: `Images ${fmt(layers)} • Volumes ${fmt(vols)}`, value: '' });
-
-    const dangling = (state.df.Images || []).filter(i => !(i.RepoTags || []).length || i.RepoTags[0] === '<none>:<none>');
-    if (dangling.length) {
-      const reclaim = dangling.reduce((a, i) => a + (i.Size || 0), 0);
-      items.push({
-        sev: 'warn', icon: '🧹',
-        title: `${dangling.length} dangling image${dangling.length > 1 ? 's' : ''}`,
-        sub: `~${fmt(reclaim)} reclaimable`,
-        value: '', action: '<button class="btn btn-warn" id="prune-imgs-btn">Prune</button>'
-      });
-    }
-    const unusedVols = volsArr.filter(v => (v.UsageData && v.UsageData.RefCount === 0));
-    if (unusedVols.length) {
-      const sz = unusedVols.reduce((a, v) => a + ((v.UsageData && v.UsageData.Size > 0) ? v.UsageData.Size : 0), 0);
-      items.push({ sev: '', icon: '🗃️', title: `${unusedVols.length} unused volume${unusedVols.length > 1 ? 's' : ''}`, sub: `Not attached to any container${sz > 0 ? ' • ~' + fmt(sz) : ''}`, value: '' });
-    }
-  }
-
-  // — Sort by severity, count alerts, badge —
-  items.sort((a, b) => sevRank[a.sev] - sevRank[b.sev]);
-  const alerts = items.filter(i => i.sev === 'crit' || i.sev === 'warn').length;
-  if (!alerts) items.unshift({ sev: 'good', icon: '✓', title: 'All systems healthy', sub: 'No alerts across your containers', value: '' });
-
-  const showBadge = state.config.alertBadge !== false;
-  const shown = showBadge ? alerts : 0;
+  // Alert badge (easing items no longer count)
+  const alerts = items.filter(i => !i.easing && (i.sev === 'crit' || i.sev === 'warn')).length;
+  if (!alerts) items.push({ key: 'allgood', section: 'status', sev: 'good', icon: '✓',
+    title: 'All systems healthy', sub: 'No alerts across your containers', value: '' });
+  const shown = state.config.alertBadge !== false ? alerts : 0;
   const badge = $('nav-alerts-count');
   badge.style.display = shown ? '' : 'none';
   badge.textContent = shown;
-  state.alertCount = shown;      // feeds tray + dock; real alerts still render in the list below
+  state.alertCount = shown;
   api.dockBadge(shown);
 
-  const upd = $('insights-updated');
-  if (upd) upd.textContent = 'updated ' + new Date().toLocaleTimeString();
+  const updLbl = $('insights-updated');
+  if (updLbl) updLbl.textContent = 'updated ' + new Date().toLocaleTimeString();
 
-  // Only rewrite the DOM when the content actually changed — the old behavior
-  // (full innerHTML rebuild every refresh) made items flicker and "disappear"
-  // under the cursor mid-read.
-  const html = items.map(i => `
-    <div class="insight-item ${i.sev}${i.cid ? ' clickable' : ''}"${i.cid ? ` data-cid="${i.cid}"` : ''}>
-      <div class="insight-icon">${i.icon}</div>
-      <div class="insight-body"><div class="insight-title">${i.title}</div><div class="insight-sub">${i.sub}</div></div>
-      <div class="insight-value">${i.value}</div>
-      ${i.action ? `<div class="insight-action">${i.action}</div>` : ''}
-    </div>`).join('');
-  if (html === state._insightsHtml) return;
-  state._insightsHtml = html;
-  $('insights-list').innerHTML = html;
+  // ── Reconcile DOM in place ──
+  const root = $('insights-list');
+  if (!root.dataset.init) {
+    root.dataset.init = '1';
+    root.innerHTML = INS_SECTIONS.map(([id, label]) =>
+      `<div class="ins-sec" data-sec="${id}" style="display:none">
+         <div class="ins-sec-title">${label}<span class="ins-sec-count"></span></div>
+         <div class="ins-sec-body"></div>
+       </div>`).join('');
+  }
 
-  // Clickable insights → container detail
-  document.querySelectorAll('#insights-list .insight-item[data-cid]').forEach(el =>
-    el.addEventListener('click', () => openDetail(el.dataset.cid)));
+  const sevRank = { crit: 0, warn: 1, info: 2, none: 3, good: 4 };
+  for (const [secId] of INS_SECTIONS) {
+    const secEl = root.querySelector(`.ins-sec[data-sec="${secId}"]`);
+    const body = secEl.querySelector('.ins-sec-body');
+    const secItems = items.filter(i => i.section === secId)
+      .sort((a, b) => (a.easing - b.easing) || (sevRank[a.sev] ?? 3) - (sevRank[b.sev] ?? 3) || a.title.localeCompare(b.title));
 
-  // Update actions
-  document.querySelectorAll('.upd-btn').forEach(b => b.addEventListener('click', async (e) => {
-    e.stopPropagation();
-    const u = (state.updates?.results || []).find(x => x.image === b.dataset.img);
+    secEl.style.display = secItems.length ? '' : 'none';
+    secEl.querySelector('.ins-sec-count').textContent = secItems.length || '';
+
+    const wanted = new Set(secItems.map(i => i.key));
+    [...body.children].forEach(n => { if (!wanted.has(n.dataset.key)) n.remove(); });
+
+    secItems.forEach(i => {
+      let node = body.querySelector(`[data-key="${CSS.escape(i.key)}"]`);
+      if (!node) {
+        node = document.createElement('div');
+        node.dataset.key = i.key;
+        node.innerHTML = `<div class="ins-icon"></div>
+          <div class="ins-body"><div class="ins-title"></div><div class="ins-sub"></div></div>
+          <div class="ins-value"></div><div class="ins-act"></div>`;
+        body.appendChild(node);
+      }
+      const cls = `ins-item sev-${i.sev}${i.cid ? ' clickable' : ''}${i.easing ? ' easing' : ''}`;
+      if (node.className !== cls) node.className = cls;
+      if (i.cid) node.dataset.cid = i.cid; else delete node.dataset.cid;
+      const set = (sel, txt) => { const el2 = node.querySelector(sel); if (el2.textContent !== txt) el2.textContent = txt; };
+      set('.ins-icon', i.icon);
+      set('.ins-title', i.title);
+      set('.ins-sub', i.sub || '');
+      set('.ins-value', i.value || '');
+      const act = node.querySelector('.ins-act');
+      const ah = i.actions || '';
+      if (act.dataset.h !== ah) { act.dataset.h = ah; act.innerHTML = ah; }
+    });
+
+    // Fix ordering without destroying nodes (appendChild moves in place)
+    const order = secItems.map(i => i.key);
+    const current = [...body.children].map(n => n.dataset.key);
+    if (order.join('\n') !== current.join('\n'))
+      order.forEach(k => body.appendChild(body.querySelector(`[data-key="${CSS.escape(k)}"]`)));
+  }
+}
+
+// One delegated listener — attached once, survives every re-render
+$('insights-list').addEventListener('click', async (e) => {
+  const btn = e.target.closest('[data-act]');
+  if (btn) { e.stopPropagation(); await insightsAction(btn); return; }
+  const item = e.target.closest('.ins-item[data-cid]');
+  if (item) openDetail(item.dataset.cid);
+});
+
+async function insightsAction(btn) {
+  const act = btn.dataset.act;
+
+  if (act === 'app-upd') { api.openUrl(state.appUpdate.url); return; }
+  if (act === 'gh-view') { api.openUrl(btn.dataset.url); return; }
+  if (act === 'gh-seen') { markGhSeen(btn.dataset.repo); return; }
+
+  if (act === 'upd') {
+    const u = (state.updates?.results || []).find(x => x.image === btn.dataset.img);
     if (!u) return;
     if (!confirm(`Update ${u.shortName}?\n\nThis pulls the new image and recreates: ${u.containers.map(c => c.name).join(', ')}.\nConfig, ports and volumes are preserved. If anything fails, the old container is restored.`)) return;
-    b.disabled = true; b.textContent = 'Updating…';
+    btn.disabled = true; btn.textContent = 'Updating…';
     toast(`Pulling ${u.image} — this can take a few minutes…`, 'info', 8000);
     for (const c of u.containers) {
       const r = await api.updates.apply({ ...state.config, id: c.id });
@@ -2654,36 +2793,24 @@ function renderInsights(per) {
     const rc = await api.updates.check({ ...state.config, force: true });
     if (rc.ok) state.updates = rc;
     loadDashboard();
-  }));
+    return;
+  }
 
-  // Portside update action
-  const ab = document.getElementById('app-upd-btn');
-  if (ab) ab.addEventListener('click', (e) => { e.stopPropagation(); api.openUrl(state.appUpdate.url); });
-
-  // Prune action
-  const pb = document.getElementById('prune-imgs-btn');
-  if (pb) pb.addEventListener('click', async (e) => {
-    e.stopPropagation();
-    pb.disabled = true; pb.textContent = 'Pruning…';
-    const r = await api.docker.pruneImages(state.config);
-    if (r.ok) {
-      toast(`Pruned ${(r.data?.ImagesDeleted || []).length} images — reclaimed ${fmt(r.data?.SpaceReclaimed || 0)}`, 'success');
-      state.dfFetched = 0;
-      loadDashboard();
-    } else {
-      toast('Prune failed: ' + r.error, 'error');
-      pb.disabled = false; pb.textContent = 'Prune';
-    }
-  });
-
-  // GitHub release actions
-  document.querySelectorAll('.gh-rel-btn').forEach(b => b.addEventListener('click', (e) => {
-    e.stopPropagation(); api.openUrl(b.dataset.url);
-  }));
-  document.querySelectorAll('.gh-seen-btn').forEach(b => b.addEventListener('click', (e) => {
-    e.stopPropagation();
-    markGhSeen(b.dataset.repo);
-  }));
+  if (act === 'prune-imgs' || act === 'prune-vols' || act === 'prune-stopped') {
+    const conf = {
+      'prune-imgs': ['Remove dangling (untagged) image layers?', () => api.docker.pruneImages(state.config),
+        d => `Pruned ${(d.ImagesDeleted || []).length} images — reclaimed ${fmt(d.SpaceReclaimed || 0)}`],
+      'prune-vols': ['Remove volumes not attached to any container?\n\n⚠ Data in those volumes is permanently deleted.', () => api.docker.pruneVolumes(state.config),
+        d => `Removed ${(d.VolumesDeleted || []).length} volumes — reclaimed ${fmt(d.SpaceReclaimed || 0)}`],
+      'prune-stopped': ['Remove ALL stopped containers?\n\nImages, volumes and bind-mounted data are untouched.', () => api.docker.pruneContainers(state.config),
+        d => `Removed ${(d.ContainersDeleted || []).length} stopped containers — reclaimed ${fmt(d.SpaceReclaimed || 0)}`]
+    }[act];
+    if (!confirm(conf[0])) return;
+    btn.disabled = true; btn.textContent = 'Working…';
+    const r = await conf[1]();
+    if (r.ok) { toast(conf[2](r.data || {}), 'success', 6000); state.dfFetched = 0; await loadDashboard(); }
+    else { toast('Failed: ' + r.error, 'error', 7000); btn.disabled = false; btn.textContent = 'Retry'; }
+  }
 }
 
 function setConnected(ok) {
@@ -2721,14 +2848,16 @@ function renderContainerTable(targetId, containers) {
       <td>
         <div class="action-group">
           ${sc === 'running'
-            ? `${(c.Ports || []).some(p => p.PublicPort)
-                 ? `<button class="btn btn-icon" data-action="web" data-id="${c.Id}" data-wport="${(c.Ports || []).filter(p => p.PublicPort).sort((a, b) => a.PublicPort - b.PublicPort)[0].PublicPort}" title="Open Web UI">🌐</button>` : ''}
-               <button class="btn btn-warn btn-icon" data-action="stop" data-id="${c.Id}" title="Stop">■</button>
+            ? `<button class="btn btn-warn btn-icon" data-action="stop" data-id="${c.Id}" title="Stop">■</button>
                <button class="btn btn-icon" data-action="restart" data-id="${c.Id}" title="Restart">↻</button>
                <button class="btn btn-icon font-mono" data-action="console" data-id="${c.Id}" title="Console" style="font-size:10px">&gt;_</button>`
             : `<button class="btn btn-success btn-icon" data-action="start" data-id="${c.Id}" title="Start">▶</button>`}
           <button class="btn btn-icon" data-action="logs" data-id="${c.Id}" title="Logs">≡</button>
           <button class="btn btn-icon" data-action="edit" data-id="${c.Id}" title="Edit container">✎</button>
+          <button class="btn btn-icon" data-action="customize" data-id="${c.Id}" title="Customize (nickname, color, group)">🎨</button>
+          ${sc === 'running' && (c.Ports || []).some(p => p.PublicPort)
+            ? `<button class="btn btn-icon" data-action="web" data-id="${c.Id}" data-wport="${(c.Ports || []).filter(p => p.PublicPort).sort((a, b) => a.PublicPort - b.PublicPort)[0].PublicPort}" title="Open Web UI">🌐</button>`
+            : `<span class="btn btn-icon" style="visibility:hidden;pointer-events:none">🌐</span>`}
         </div>
       </td>
     </tr>`;
@@ -2757,6 +2886,7 @@ function renderContainerTable(targetId, containers) {
       if (action === 'console') { openTerminalFor(id); return; }
       if (action === 'web') { api.openUrl(`http://${state.config.host}:${btn.dataset.wport}`); return; }
       if (action === 'edit') { openEditContainer(id); return; }
+      if (action === 'customize') { openCustomize(btn.closest('tr').dataset.name); return; }
       const rowName = btn.closest('tr') ? btn.closest('tr').dataset.name : id.slice(0, 12);
       const ok = await runContainerAction(id, action, rowName, btn);
       if (ok) setTimeout(() => loadDashboard(), 1500);
@@ -2872,17 +3002,50 @@ function renderContainersList() {
 
   el.innerHTML = names.map((g, i) => {
     const collapsed = !!state.collapsedGroups[g];
+    const editable = g !== 'Ungrouped';
     return `<div class="group-section${collapsed ? ' collapsed' : ''}" data-gi="${i}">
-      <div class="group-header${collapsed ? ' collapsed' : ''}"><span class="gh-arrow">▾</span>${escHtml(g)}<span class="gh-count">${groups.get(g).length}</span></div>
+      <div class="group-header${collapsed ? ' collapsed' : ''}">
+        <span class="gh-arrow">▾</span>${escHtml(g)}<span class="gh-count">${groups.get(g).length}</span>
+        ${editable ? `<span class="gh-actions">
+          <button class="gh-btn" data-gh-rename="${i}" title="Rename group">✎</button>
+          <button class="gh-btn" data-gh-dissolve="${i}" title="Dissolve group (containers keep running, just ungrouped)">✕</button>
+        </span>` : ''}
+      </div>
       <div class="group-body" id="grp-body-${i}"></div>
     </div>`;
   }).join('');
   names.forEach((g, i) => { if (!state.collapsedGroups[g]) render(`grp-body-${i}`, groups.get(g)); });
   el.querySelectorAll('.group-header').forEach(h =>
-    h.addEventListener('click', () => {
+    h.addEventListener('click', (e) => {
+      if (e.target.closest('.gh-btn')) return; // header buttons handle themselves
       const g = names[+h.parentElement.dataset.gi];
       state.collapsedGroups[g] = !state.collapsedGroups[g];
       renderContainersList();
+    }));
+  el.querySelectorAll('[data-gh-rename]').forEach(b =>
+    b.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const g = names[+b.dataset.ghRename];
+      const nn = (prompt(`Rename group "${g}" to:`, g) || '').trim();
+      if (!nn || nn === g) return;
+      const map = { ...(state.config.gcGroups || {}) };
+      for (const k of Object.keys(map)) if (map[k] === g) map[k] = nn;
+      if (state.collapsedGroups[g]) { state.collapsedGroups[nn] = true; delete state.collapsedGroups[g]; }
+      saveCfg({ gcGroups: map });
+      renderContainersList();
+      toast(`Group renamed to "${nn}"`, 'success');
+    }));
+  el.querySelectorAll('[data-gh-dissolve]').forEach(b =>
+    b.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const g = names[+b.dataset.ghDissolve];
+      if (!confirm(`Dissolve group "${g}"?\n\nIts containers are untouched — they just become ungrouped.`)) return;
+      const map = { ...(state.config.gcGroups || {}) };
+      for (const k of Object.keys(map)) if (map[k] === g) delete map[k];
+      delete state.collapsedGroups[g];
+      saveCfg({ gcGroups: map });
+      renderContainersList();
+      toast(`Group "${g}" dissolved`, 'info');
     }));
 }
 
@@ -4101,7 +4264,7 @@ async function loadSettings() {
 
 // ─── Container Updates settings ───────────────────────────────────────────────
 function renderUpdSettings() {
-  $('setting-upd-interval').value = String(state.config.updInterval !== undefined ? state.config.updInterval : 21600000);
+  $('setting-upd-interval').value = String(state.config.updInterval !== undefined ? state.config.updInterval : 3600000);
   $('setting-upd-notify').checked = state.config.updNotify !== false;
 
   const auto = state.config.autoUpdate || {};
@@ -4121,16 +4284,18 @@ function renderUpdSettings() {
 
 function renderGhWatchList() {
   const watch = state.config.ghWatch || [];
-  const seen = state.config.ghSeen || {};
   const latest = state.ghLatest || {};
   $('ghwatch-list').innerHTML = watch.length
     ? watch.map(repo => {
         const l = latest[repo];
-        const tag = (l && l.tag) || seen[repo] || '';
+        const seen = ghSeenFor(repo);
+        const tag = (l && l.tag) || seen.tag || '';
+        const sha = (l && l.commit && l.commit.shortSha) || (seen.sha || '').slice(0, 7);
+        const bits = [tag, sha && '@' + sha].filter(Boolean).join(' ');
         const isNew = (state.ghNew || []).some(g => g.repo === repo);
         return `<div class="ghwatch-row">
           <span class="gw-repo">${escHtml(repo)}</span>
-          ${tag ? `<span class="gw-tag">${isNew ? '🆕 ' : ''}${escHtml(tag)}</span>` : ''}
+          ${bits ? `<span class="gw-tag">${isNew ? '🆕 ' : ''}${escHtml(bits)}</span>` : ''}
           <button class="btn btn-icon" data-gw-remove="${escHtml(repo)}" title="Stop watching">✕</button>
         </div>`;
       }).join('')
@@ -4166,14 +4331,22 @@ $('ghwatch-add-btn').addEventListener('click', async () => {
   if (!r.ok) { toast(r.error || 'Repo not found', 'error', 6000); return; }
   const watch = state.config.ghWatch || [];
   if (watch.includes(r.repo)) { toast('Already watching ' + r.repo, 'info'); return; }
-  // Record the current release as "seen" so only FUTURE releases alert
+  // Baseline the current state so only FUTURE commits/releases alert
   saveCfg({
     ghWatch: [...watch, r.repo],
-    ghSeen: { ...(state.config.ghSeen || {}), [r.repo]: r.tag }
+    ghSeen: { ...(state.config.ghSeen || {}), [r.repo]: { tag: r.tag || '', sha: (r.commit && r.commit.sha) || '' } }
   });
   state.ghLatest = { ...(state.ghLatest || {}), [r.repo]: r };
   $('ghwatch-repo').value = '';
-  toast(`Watching ${r.repo} — current release ${r.tag || 'n/a'}. You'll be notified on the next one.`, 'success', 6000);
+  toast(`Watching ${r.repo} — you'll be alerted on the next commit or release.`, 'success', 6000);
+  renderGhWatchList();
+});
+
+$('upd-check-now-btn').addEventListener('click', async () => {
+  const btn = $('upd-check-now-btn');
+  btn.disabled = true; btn.textContent = 'Checking…';
+  await Promise.all([checkUpdates(true, true), checkGhReleases(true)]);
+  btn.disabled = false; btn.textContent = 'Check now';
   renderGhWatchList();
 });
 
@@ -4312,13 +4485,6 @@ async function runPrune(btn, label, confirmMsg, fn, summarize, after) {
   state.dfFetched = 0;
   if (after) await after();
 }
-
-$('containers-prune-btn').addEventListener('click', () =>
-  runPrune($('containers-prune-btn'), 'Prune',
-    'Remove ALL stopped containers?\n\nTheir writable layers are deleted. Images, volumes and bind-mounted data are untouched.',
-    () => api.docker.pruneContainers(state.config),
-    d => `Removed ${(d.ContainersDeleted || []).length} stopped container${(d.ContainersDeleted || []).length === 1 ? '' : 's'} — reclaimed ${fmt(d.SpaceReclaimed || 0)}`,
-    async () => { await loadDashboard(); renderContainersList(); }));
 
 $('images-prune-btn').addEventListener('click', () =>
   runPrune($('images-prune-btn'), 'Prune',
