@@ -1500,16 +1500,15 @@
 
         <div class="settings-card">
           <div class="settings-card-title">🐙 GitHub Watch</div>
-          <div class="form-hint" style="margin-top:-4px;margin-bottom:12px">Watches <b>source-code repos</b> for new commits and releases — the repos behind apps you build yourself. Link a repo to its container and you get a one-click <b>Deploy</b> on the alert; turn on <b>Auto</b> and a push is pulled onto the NAS and restarted with no clicks at all. Checked on the same schedule as Image Updates. Private repos use your Git Deploy token automatically.</div>
+          <div class="form-hint" style="margin-top:-4px;margin-bottom:12px">Watches <b>source-code repos</b> for new commits and releases. <b>Any repo you configure in Git Deploy is watched and linked to its container automatically</b> — no need to add it here. On a push you get a one-click <b>Deploy</b>; turn on <b>Auto</b> and it deploys itself. Checked on the same schedule as Image Updates. Private repos use your Git Deploy token. The box below is only for extra repos you want to watch without deploying (e.g. upstream projects).</div>
           <div class="switch-row" style="margin-bottom:12px">
             <input type="checkbox" id="setting-gh-enabled" checked>
             <label for="setting-gh-enabled" style="font-size:13px;cursor:pointer;font-weight:600">Enable GitHub watch</label>
           </div>
           <div id="ghwatch-list" style="margin-bottom:8px"></div>
           <div style="display:flex;gap:6px;flex-wrap:wrap">
-            <input class="form-input" id="ghwatch-repo" placeholder="owner/repo  e.g. Mac2100/SignPro" spellcheck="false" style="flex:1;min-width:200px">
+            <input class="form-input" id="ghwatch-repo" placeholder="watch an extra repo:  owner/repo" spellcheck="false" style="flex:1;min-width:200px">
             <button class="btn btn-primary" id="ghwatch-add-btn">Watch</button>
-            <button class="btn" id="ghwatch-import-btn" title="Watch every repo already configured in Git Deploy — linked to its container automatically">⤵ Import from Git Deploy</button>
             <button class="btn" id="ghwatch-check-btn" title="Check watched repos right now">Check now</button>
           </div>
         </div>
@@ -2205,8 +2204,30 @@ function ghSeenFor(repo) {
   return typeof s === 'string' ? { tag: s } : s; // migrate old string form
 }
 
+// Git Deploy is the single source of truth: any repo configured on a container
+// is watched + linked automatically. No double entry. Repos you explicitly
+// removed from the watch list (ghIgnored) stay removed.
+async function syncGhFromGitDeploy() {
+  try {
+    const deploys = await api.gitdeploy.list();
+    const ignored = new Set(state.config.ghIgnored || []);
+    let watch = [...(state.config.ghWatch || [])];
+    const cfgAll = { ...(state.config.ghWatchCfg || {}) };
+    let changed = false;
+    for (const [container, d] of Object.entries(deploys || {})) {
+      const repo = repoFromUrl(d.repoUrl);
+      if (!repo || ignored.has(repo)) continue;
+      if (!watch.includes(repo)) { watch.push(repo); changed = true; } // first check baselines it silently
+      const cfg = cfgAll[repo] || {};
+      if (cfg.container === undefined) { cfgAll[repo] = { ...cfg, container }; changed = true; }
+    }
+    if (changed) saveCfg({ ghWatch: watch, ghWatchCfg: cfgAll });
+  } catch {}
+}
+
 async function checkGhReleases(announce) {
   if (state.config.ghEnabled === false && !announce) return; // disabled — manual checks still allowed
+  await syncGhFromGitDeploy();
   const watch = state.config.ghWatch || [];
   if (!watch.length) { state.ghNew = []; return; }
   const prevNew = new Set((state.ghNew || []).map(g => g.repo + '@' + g.what));
@@ -3968,6 +3989,7 @@ async function gdSave() {
     branch: $('gd-branch').value.trim() || 'main',
     folder: $('gd-folder').value.trim()
   });
+  syncGhFromGitDeploy(); // configuring Git Deploy is all it takes — the repo is now watched
 }
 function gdValid() {
   if (!$('gd-repo').value.trim()) { toast('Enter the GitHub repo URL', 'error'); return false; }
@@ -4495,6 +4517,7 @@ function renderUpdSettings() {
     }));
 
   renderGhWatchList();
+  syncGhFromGitDeploy().then(renderGhWatchList); // pick up any Git Deploy configs saved since last check
 }
 
 function renderGhWatchList() {
@@ -4540,42 +4563,17 @@ function renderGhWatchList() {
       const repo = b.dataset.gwRemove;
       const seen2 = { ...(state.config.ghSeen || {}) }; delete seen2[repo];
       const cfg2 = { ...(state.config.ghWatchCfg || {}) }; delete cfg2[repo];
-      saveCfg({ ghWatch: (state.config.ghWatch || []).filter(r => r !== repo), ghSeen: seen2, ghWatchCfg: cfg2 });
+      saveCfg({
+        ghWatch: (state.config.ghWatch || []).filter(r => r !== repo),
+        ghSeen: seen2, ghWatchCfg: cfg2,
+        // remember the removal so auto-sync from Git Deploy doesn't re-add it
+        ghIgnored: [...new Set([...(state.config.ghIgnored || []), repo])]
+      });
       state.ghNew = (state.ghNew || []).filter(g => g.repo !== repo);
       renderGhWatchList();
       renderInsights(state.lastPer || []);
     }));
 }
-
-// Watch every repo already configured in Git Deploy, linked to its container
-$('ghwatch-import-btn').addEventListener('click', async () => {
-  const btn = $('ghwatch-import-btn');
-  btn.disabled = true; btn.textContent = 'Importing…';
-  try {
-    const deploys = await api.gitdeploy.list();
-    const entries = Object.entries(deploys || {});
-    if (!entries.length) { toast('No Git Deploy configs found — set up a repo on a container first (container → ⬆ Deploy)', 'info', 7000); return; }
-    let added = 0, linked = 0;
-    for (const [container, d] of entries) {
-      const repo = repoFromUrl(d.repoUrl);
-      if (!repo) continue;
-      const watch = state.config.ghWatch || [];
-      if (!watch.includes(repo)) {
-        const r = await api.github.latestRelease({ repo });
-        if (!r.ok) { toast(`${repo}: ${r.error}`, 'error', 6000); continue; }
-        saveCfg({
-          ghWatch: [...(state.config.ghWatch || []), r.repo],
-          ghSeen: { ...(state.config.ghSeen || {}), [r.repo]: { tag: r.tag || '', sha: (r.commit && r.commit.sha) || '' } }
-        });
-        state.ghLatest = { ...(state.ghLatest || {}), [r.repo]: r };
-        added++;
-      }
-      if (!ghCfgFor(repo).container) { setGhCfg(repo, { container }); linked++; }
-    }
-    toast(`Imported ${added} repo${added === 1 ? '' : 's'}${linked ? `, linked ${linked} to containers` : ''} — turn on Auto for hands-free deploys`, 'success', 8000);
-    renderGhWatchList();
-  } finally { btn.disabled = false; btn.textContent = '⤵ Import from Git Deploy'; }
-});
 
 $('setting-upd-interval').addEventListener('change', (e) => {
   saveCfg({ updInterval: +e.target.value });
@@ -4614,7 +4612,8 @@ $('ghwatch-add-btn').addEventListener('click', async () => {
   // Baseline the current state so only FUTURE commits/releases alert
   saveCfg({
     ghWatch: [...watch, r.repo],
-    ghSeen: { ...(state.config.ghSeen || {}), [r.repo]: { tag: r.tag || '', sha: (r.commit && r.commit.sha) || '' } }
+    ghSeen: { ...(state.config.ghSeen || {}), [r.repo]: { tag: r.tag || '', sha: (r.commit && r.commit.sha) || '' } },
+    ghIgnored: (state.config.ghIgnored || []).filter(x => x !== r.repo) // manual add overrides an earlier removal
   });
   state.ghLatest = { ...(state.ghLatest || {}), [r.repo]: r };
   $('ghwatch-repo').value = '';
