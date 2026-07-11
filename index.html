@@ -1796,7 +1796,7 @@
     </div>
     <div class="modal-body">
       <div class="deploy-label" style="margin-top:0">GitHub repo URL</div>
-      <input class="form-input" id="gd-repo" placeholder="https://github.com/Mac2100/SignPro.git" spellcheck="false">
+      <input class="form-input" id="gd-repo" placeholder="e.g. https://github.com/owner/repo.git" spellcheck="false">
       <div style="display:flex;gap:14px">
         <div style="flex:1">
           <div class="deploy-label">Branch</div>
@@ -1818,6 +1818,7 @@
     </div>
     <div class="modal-footer">
       <span id="gd-status" style="font-size:11px;color:var(--text-muted);margin-right:auto;align-self:center"></span>
+      <button class="btn btn-primary" id="gd-save-btn">Save</button>
       <button class="btn" id="gd-close-btn2">Close</button>
     </div>
   </div>
@@ -4046,16 +4047,24 @@ async function openGitDeploy(id, name) {
   }
   $('gitdeploy-modal').classList.add('open');
 }
-function closeGitDeploy() { $('gitdeploy-modal').classList.remove('open'); gdKey = null; gdRestartId = null; }
+// Closing always persists whatever is filled in — no silent data loss.
+async function closeGitDeploy() {
+  if (gdKey && ($('gd-repo').value.trim() || $('gd-folder').value.trim())) {
+    try { await gdSave(true); } catch {}
+  }
+  $('gitdeploy-modal').classList.remove('open'); gdKey = null; gdRestartId = null;
+}
 
-async function gdSave() {
+async function gdSave(silent) {
+  if (!gdKey) return;
   await api.gitdeploy.set({
     key: gdKey,
     repoUrl: $('gd-repo').value.trim(),
     branch: $('gd-branch').value.trim() || 'main',
     folder: $('gd-folder').value.trim()
   });
-  syncGhFromGitDeploy(); // configuring Git Deploy is all it takes — the repo is now watched
+  await syncGhFromGitDeploy(); // configuring Git Deploy is all it takes — the repo is now watched
+  if (!silent) toast('Git Deploy settings saved ✓', 'success');
 }
 function gdValid() {
   if (!$('gd-repo').value.trim()) { toast('Enter the GitHub repo URL', 'error'); return false; }
@@ -4065,7 +4074,7 @@ function gdValid() {
 }
 async function gdDeploy(ref) {
   if (!gdValid()) return;
-  await gdSave();
+  await gdSave(true);
   const out = $('gd-output'); out.style.display = ''; out.textContent = (ref ? 'Rolling back' : 'Pulling latest') + '…';
   $('gd-status').textContent = 'Working…';
   ['gd-deploy-btn','gd-versions-btn','gd-rollback-btn'].forEach(b => $(b).disabled = true);
@@ -4080,7 +4089,7 @@ async function gdDeploy(ref) {
 }
 async function gdVersions() {
   if (!gdValid()) return;
-  await gdSave();
+  await gdSave(true);
   $('gd-versions-btn').disabled = true; $('gd-status').textContent = 'Fetching versions…';
   const r = await api.gitdeploy.versions({ ...state.config, key: gdKey });
   $('gd-versions-btn').disabled = false; $('gd-status').textContent = '';
@@ -4091,6 +4100,12 @@ async function gdVersions() {
 }
 $('gd-close-btn').addEventListener('click', closeGitDeploy);
 $('gd-close-btn2').addEventListener('click', closeGitDeploy);
+$('gd-save-btn').addEventListener('click', async () => {
+  if (!$('gd-repo').value.trim()) { toast('Enter the GitHub repo URL', 'error'); return; }
+  if (!$('gd-folder').value.trim()) { toast('Enter the app folder path', 'error'); return; }
+  $('gd-save-btn').disabled = true;
+  try { await gdSave(); } finally { $('gd-save-btn').disabled = false; }
+});
 $('gd-deploy-btn').addEventListener('click', () => gdDeploy(null));
 $('gd-versions-btn').addEventListener('click', gdVersions);
 $('gd-rollback-btn').addEventListener('click', () => {
