@@ -3,7 +3,19 @@ const ACTION_VERB = { start:['Start','Starting','Started'], stop:['Stop','Stoppi
 // Run a container action with immediate feedback: confirm (for disruptive ones), a "…ing" toast, busy button, then result.
 async function runContainerAction(id, action, name, btn) {
   const v = ACTION_VERB[action] || [action, action + '…', action + 'ed'];
-  if ((action === 'stop' || action === 'restart' || action === 'remove') && !confirm(`${v[0]} container "${name}"?`)) return false;
+
+  // Remove is irreversible — two dialogs, different wording, so it can't be
+  // clicked through on autopilot.
+  if (action === 'remove') {
+    const ok = confirmDestructive(
+      `Remove container "${name}"?`,
+      'The container is deleted — its config, ports and logs go with it. Data in volumes and bind mounts is kept.',
+      `Delete "${name}".`
+    );
+    if (!ok) return false;
+  } else if ((action === 'stop' || action === 'restart') && !confirm(`${v[0]} container "${name}"?`)) {
+    return false;
+  }
   if (btn) btn.disabled = true;
   toast(`${v[1]} ${name}…`, 'info');
   const r = await api.docker.action({ ...state.config, id, action });

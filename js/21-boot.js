@@ -26,7 +26,9 @@ $('insights-refresh-btn').addEventListener('click', loadDashboard);
 
 // ─── Prune / remove unused (Portainer-style housekeeping) ─────────────────────
 async function runPrune(btn, label, confirmMsg, fn, summarize, after) {
-  if (!confirm(confirmMsg)) return;
+  // confirmMsg === null → volume prune: the data goes with it, so make them type it
+  const ok = confirmMsg ? confirm(confirmMsg) : await confirmVolumePrune();
+  if (!ok) return;
   const orig = btn.textContent;
   btn.disabled = true; btn.textContent = 'Pruning…';
   const r = await fn();
@@ -37,23 +39,13 @@ async function runPrune(btn, label, confirmMsg, fn, summarize, after) {
   if (after) await after();
 }
 
-$('images-prune-btn').addEventListener('click', () =>
-  runPrune($('images-prune-btn'), 'Prune',
-    'Remove dangling (untagged) image layers?\n\nThese are leftovers from image updates and are safe to delete.',
-    () => api.docker.pruneImages(state.config),
-    d => `Pruned ${(d.ImagesDeleted || []).length} image${(d.ImagesDeleted || []).length === 1 ? '' : 's'} — reclaimed ${fmt(d.SpaceReclaimed || 0)}`,
-    async () => { state.images = []; await loadImages(); loadDashboard(); }));
-
-$('images-prune-all-btn').addEventListener('click', () =>
-  runPrune($('images-prune-all-btn'), 'Remove unused',
-    'Remove EVERY image not used by a container?\n\nLike Portainer\'s "Remove unused images". Anything you later redeploy will be pulled again from the registry.',
-    () => api.docker.pruneImages({ ...state.config, all: true }),
-    d => `Removed ${(d.ImagesDeleted || []).length} unused image${(d.ImagesDeleted || []).length === 1 ? '' : 's'} — reclaimed ${fmt(d.SpaceReclaimed || 0)}`,
-    async () => { state.images = []; await loadImages(); loadDashboard(); }));
+// Images are cleaned up through the Clean up sheet (js/14-resources.js) — one
+// decision with real sizes, instead of a dangling button and an unused button
+// where the second silently did the first's job too.
 
 $('volumes-prune-btn').addEventListener('click', () =>
   runPrune($('volumes-prune-btn'), 'Prune',
-    'Remove volumes not attached to any container?\n\n⚠ Data in those volumes is permanently deleted. Bind mounts (host folders) are NOT affected.',
+    null,   // handled by confirmDestructive below — pruning volumes destroys data
     () => api.docker.pruneVolumes(state.config),
     d => `Removed ${(d.VolumesDeleted || []).length} volume${(d.VolumesDeleted || []).length === 1 ? '' : 's'} — reclaimed ${fmt(d.SpaceReclaimed || 0)}`,
     async () => { state.volumes = []; await loadVolumes(); loadDashboard(); }));

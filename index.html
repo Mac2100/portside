@@ -245,6 +245,7 @@
         <button class="btn btn-success" id="bulk-start">▶ Start</button>
         <button class="btn btn-warn" id="bulk-stop">■ Stop</button>
         <button class="btn" id="bulk-restart">↻ Restart</button>
+        <button class="btn" id="bulk-group" title="Put the selected containers into a group">🗂 Group</button>
         <button class="btn btn-danger" id="bulk-remove">🗑 Remove</button>
         <button class="btn bulk-x" id="bulk-clear" title="Clear selection">✕</button>
       </div>
@@ -258,8 +259,7 @@
       <div class="page-header">
         <div class="page-title">Images</div>
         <div class="header-actions">
-          <button class="btn btn-warn" id="images-prune-btn" title="Remove untagged (dangling) image layers">🧹 Prune dangling</button>
-          <button class="btn btn-danger" id="images-prune-all-btn" title="Remove every image not used by a container">🗑 Remove unused</button>
+          <button class="btn btn-warn" id="images-cleanup-btn" title="Reclaim space from images nothing is using">🧹 Clean up…</button>
           <button class="btn btn-primary" id="images-refresh-btn">↻ Refresh</button>
         </div>
       </div>
@@ -415,6 +415,30 @@
             <button class="btn" id="cert-reset-btn" style="display:none">Revert to bundled</button>
           </div>
           <div class="form-hint" style="margin-top:8px">Select your ca.pem, cert.pem and key.pem from a new Container Station export — they're sorted automatically.</div>
+          <div class="switch-row" style="margin-top:14px">
+            <input type="checkbox" id="setting-tls-insecure">
+            <label for="setting-tls-insecure" style="font-size:13px;cursor:pointer">Don't verify the host's certificate</label>
+          </div>
+          <div class="form-hint" style="margin-top:6px">
+            Normally Portside checks that the host's certificate was signed by your <b>ca.pem</b> — that's what proves you're talking to <i>your</i> NAS and not something else answering on that address.
+            Only turn this off if your certs no longer chain and re-importing doesn't fix it.
+          </div>
+        </div>
+
+        <div class="settings-card">
+          <div class="settings-card-title">🔑 Registries</div>
+          <div class="form-hint" style="margin-top:-4px;margin-bottom:12px">
+            Credentials for private images, and for lifting Docker Hub's anonymous pull limit (which silently breaks update checks once you run enough containers).
+            Stored encrypted in your Mac Keychain — never written to the NAS.
+          </div>
+          <div id="registry-list" style="margin-bottom:10px"></div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <input class="form-input" id="registry-host" placeholder="docker.io / ghcr.io" spellcheck="false" autocomplete="off" style="flex:1;min-width:130px">
+            <input class="form-input" id="registry-user" placeholder="username" spellcheck="false" autocomplete="off" style="flex:1;min-width:120px">
+            <input class="form-input" id="registry-pass" type="password" placeholder="token / password" spellcheck="false" autocomplete="off" style="flex:1;min-width:140px">
+            <button class="btn btn-primary" id="registry-save-btn">Add</button>
+          </div>
+          <div class="form-hint" style="margin-top:8px">Use an access token, not your account password — Docker Hub: Account Settings → Personal access tokens. GHCR: a classic token with <b>read:packages</b>.</div>
         </div>
 
         <div class="settings-card">
@@ -594,6 +618,7 @@
     <span class="log-title" id="log-title">Logs</span>
     <input id="log-search" placeholder="Search…  ⏎ next  ⇧⏎ prev" spellcheck="false">
     <button class="btn btn-icon" id="log-pause-btn" title="Pause stream">⏸</button>
+    <button class="btn btn-icon" id="log-save-btn" title="Save these logs to a file">⬇</button>
     <button class="btn btn-icon" id="log-close-btn" title="Close">✕</button>
   </div>
   <div id="log-output-term"></div>
@@ -732,6 +757,72 @@
 </div>
 
 <!-- Group create/edit modal -->
+<!-- Crash log (captured when the crash was detected) -->
+<div class="modal-overlay" id="crashlog-modal">
+  <div class="modal" style="width:760px">
+    <div class="modal-header">
+      <span style="font-size:15px">💥</span>
+      <span class="modal-title" id="crashlog-title">Crash log</span>
+      <button class="btn btn-icon" id="crashlog-close-btn">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-hint" style="margin-top:0;margin-bottom:8px">
+        Captured by Portside the moment the crash was detected — this survives the container being recreated or removed.
+      </div>
+      <pre class="export-pre" id="crashlog-body"></pre>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-danger" id="crashlog-delete-btn" style="margin-right:auto">Delete</button>
+      <button class="btn" id="crashlog-cancel-btn">Close</button>
+      <button class="btn btn-primary" id="crashlog-save-btn">⬇ Save to file</button>
+    </div>
+  </div>
+</div>
+
+<!-- Destroy confirmation (type the name — used where data dies) -->
+<div class="modal-overlay" id="destroy-modal">
+  <div class="modal" style="width:520px">
+    <div class="modal-header">
+      <span style="font-size:15px">⚠️</span>
+      <span class="modal-title" id="destroy-title">Delete</span>
+      <button class="btn btn-icon" id="destroy-close-btn">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="destroy-warn" id="destroy-warn"></div>
+      <div id="destroy-list" class="destroy-list"></div>
+      <div class="deploy-label">Type <b id="destroy-phrase-label"></b> to confirm</div>
+      <input class="form-input" id="destroy-phrase" spellcheck="false" autocomplete="off" placeholder="">
+    </div>
+    <div class="modal-footer">
+      <button class="btn" id="destroy-cancel-btn">Cancel</button>
+      <button class="btn btn-danger" id="destroy-go-btn" disabled>Delete permanently</button>
+    </div>
+  </div>
+</div>
+
+<!-- Image cleanup -->
+<div class="modal-overlay" id="cleanup-modal">
+  <div class="modal" style="width:560px">
+    <div class="modal-header">
+      <span style="font-size:15px">🧹</span>
+      <span class="modal-title">Clean up images</span>
+      <button class="btn btn-icon" id="cleanup-close-btn">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-hint" style="margin-top:0;margin-bottom:12px">
+        Pick what to remove. Nothing here is used by a container — the difference is what it costs you to get it back.
+      </div>
+      <div id="cleanup-options"></div>
+      <div class="cleanup-total" id="cleanup-total"></div>
+    </div>
+    <div class="modal-footer">
+      <span id="cleanup-status" style="font-size:11px;color:var(--text-muted);margin-right:auto;align-self:center"></span>
+      <button class="btn" id="cleanup-cancel-btn">Cancel</button>
+      <button class="btn btn-warn" id="cleanup-go-btn">Remove</button>
+    </div>
+  </div>
+</div>
+
 <!-- Export container config -->
 <div class="modal-overlay" id="export-modal">
   <div class="modal" style="width:720px">
@@ -767,7 +858,9 @@
     </div>
     <div class="modal-body">
       <div class="deploy-label" style="margin-top:0">Group name</div>
-      <input class="form-input" id="group-name" placeholder="e.g. Media, SaaS, Tools" spellcheck="false" autocomplete="off">
+      <input class="form-input" id="group-name" list="group-name-list" placeholder="e.g. Media, SaaS, Tools" spellcheck="false" autocomplete="off">
+      <datalist id="group-name-list"></datalist>
+      <div class="form-hint" id="group-existing-hint" style="margin-top:6px;display:none"></div>
       <div class="deploy-label">Containers in this group</div>
       <div class="form-hint" style="margin-top:0;margin-bottom:8px">Checking a container moves it here (a container can only be in one group).</div>
       <div id="group-members" style="max-height:300px;overflow-y:auto"></div>
@@ -796,6 +889,9 @@
         <button class="btn btn-primary" id="compose-parse-btn">Preview</button>
         <input type="file" id="compose-file-input" accept=".yml,.yaml,text/yaml" style="display:none">
       </div>
+      <div class="deploy-label">Stack name</div>
+      <input class="form-input" id="compose-project" placeholder="e.g. media" spellcheck="false" autocomplete="off">
+      <div class="form-hint" style="margin-top:6px">These containers get labelled as one compose project, so Portside groups them as a stack with start/stop/restart for the whole thing. Leave blank to import them as loose containers.</div>
       <div id="compose-preview" style="margin-top:14px"></div>
     </div>
     <div class="modal-footer">

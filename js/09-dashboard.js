@@ -56,8 +56,13 @@ async function loadDashboard() {
       if (!c) continue;
       const nm = sanitizeName(c.Names && c.Names[0]);
       const exit = /Exited \((\d+)\)/.exec(c.Status || '');
-      if (exit && exit[1] !== '0') notify('crashed', `${nm} crashed — exit code ${exit[1]}`);
-      else notify('stopped', `${nm} stopped — ${c.Status || ''}`);
+      if (exit && exit[1] !== '0') {
+        notify('crashed', `${nm} crashed — exit code ${exit[1]}`);
+        // Grab the logs NOW: if this container gets recreated, they're gone.
+        captureCrashLog(c, exit[1]);
+      } else {
+        notify('stopped', `${nm} stopped — ${c.Status || ''}`);
+      }
     }
   }
   state.prevRunningIds = runningIds;

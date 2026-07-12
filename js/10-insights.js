@@ -35,10 +35,18 @@ function computeInsights(per) {
 
   state.containers.forEach(c => {
     const m = /Exited \((\d+)\)/.exec(c.Status || '');
-    if (m && m[1] !== '0')
-      add({ key: 'crashed-' + c.Id, section: 'attention', sev: 'warn', icon: '💥', cid: c.Id,
-        title: `Crashed — ${name1(c)}`, sub: `${c.Status} · exited with a non-zero code`, value: 'exit ' + m[1],
-        actions: `<button class="btn" data-act="logs" data-cid="${c.Id}">Logs</button><button class="btn btn-success" data-act="start" data-cid="${c.Id}">▶ Start</button>` });
+    if (!m || m[1] === '0') return;
+    // If we snapshotted the logs when it died, offer them — the container's own
+    // logs may already be gone (recreated), but ours aren't.
+    const snap = typeof crashLogFor === 'function' ? crashLogFor(name1(c)) : null;
+    add({ key: 'crashed-' + c.Id, section: 'attention', sev: 'warn', icon: '💥', cid: c.Id,
+      title: `Crashed — ${name1(c)}`,
+      sub: `${c.Status} · exited with a non-zero code${snap ? ` · logs captured ${new Date(snap.time).toLocaleTimeString()}` : ''}`,
+      value: 'exit ' + m[1],
+      actions:
+        (snap ? `<button class="btn btn-warn" data-act="crashlog" data-file="${escHtml(snap.file)}">💥 Crash log</button>` : '') +
+        `<button class="btn" data-act="logs" data-cid="${c.Id}">Logs</button>` +
+        `<button class="btn btn-success" data-act="start" data-cid="${c.Id}">▶ Start</button>` });
   });
 
   // Restart counts — only worth flagging when it's actually flapping (≥3),
@@ -103,7 +111,7 @@ function computeInsights(per) {
       add({ key: 'dangling', section: 'housekeeping', sev: 'warn', icon: '🧹',
         title: `${dangling.length} dangling image${dangling.length > 1 ? 's' : ''} — ~${fmt(reclaim)} reclaimable`,
         sub: 'Untagged leftover layers from old image versions. Nothing uses them — safe to prune.', value: '',
-        actions: `<button class="btn" data-act="view-dangling">View</button><button class="btn btn-warn" data-act="prune-imgs">Prune</button>` });
+        actions: `<button class="btn" data-act="view-dangling">View</button><button class="btn btn-warn" data-act="clean-imgs">Clean up…</button>` });
     }
     const volsArr = state.df.Volumes || [];
     const unusedVols = volsArr.filter(v => (v.UsageData && v.UsageData.RefCount === 0));
@@ -232,6 +240,8 @@ $('insights-list').addEventListener('click', async (e) => {
 async function insightsAction(btn) {
   const act = btn.dataset.act;
 
+  if (act === 'crashlog') { openCrashLog(btn.dataset.file); return; }
+
   if (act === 'logs' || act === 'start') {
     const id = btn.dataset.cid;
     const c = state.containers.find(x => x.Id === id);
@@ -269,16 +279,26 @@ async function insightsAction(btn) {
     return;
   }
 
-  if (act === 'prune-imgs' || act === 'prune-vols' || act === 'prune-stopped') {
+  // Image cleanup always goes through the same sheet as the Images page
+  if (act === 'clean-imgs') { await ensureContainers(); openCleanup(); return; }
+
+  // Both of these delete things for good. Volumes destroy DATA, so they use the
+  // type-the-name modal; stopped containers can be recreated, so a double confirm.
+  if (act === 'prune-vols' || act === 'prune-stopped') {
     const conf = {
-      'prune-imgs': ['Remove dangling (untagged) image layers?', () => api.docker.pruneImages(state.config),
-        d => `Pruned ${(d.ImagesDeleted || []).length} images — reclaimed ${fmt(d.SpaceReclaimed || 0)}`],
-      'prune-vols': ['Remove volumes not attached to any container?\n\n⚠ Data in those volumes is permanently deleted.', () => api.docker.pruneVolumes(state.config),
+      'prune-vols': [
+        () => confirmVolumePrune(),
+        () => api.docker.pruneVolumes(state.config),
         d => `Removed ${(d.VolumesDeleted || []).length} volumes — reclaimed ${fmt(d.SpaceReclaimed || 0)}`],
-      'prune-stopped': ['Remove ALL stopped containers?\n\nImages, volumes and bind-mounted data are untouched.', () => api.docker.pruneContainers(state.config),
+      'prune-stopped': [
+        () => confirmDestructive(
+          'Remove ALL stopped containers?',
+          'Their config, ports and logs are deleted. Images, volumes and bind-mounted data are untouched — but you\'ll have to recreate the containers themselves.',
+          'Delete every stopped container.'),
+        () => api.docker.pruneContainers(state.config),
         d => `Removed ${(d.ContainersDeleted || []).length} stopped containers — reclaimed ${fmt(d.SpaceReclaimed || 0)}`]
     }[act];
-    if (!confirm(conf[0])) return;
+    if (!(await conf[0]())) return;
     btn.disabled = true; btn.textContent = 'Working…';
     const r = await conf[1]();
     if (r.ok) { toast(conf[2](r.data || {}), 'success', 6000); state.dfFetched = 0; await loadDashboard(); }

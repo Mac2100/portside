@@ -129,11 +129,60 @@ async function loadSettings() {
   api.appx.getLoginItem().then(v => { $('setting-autostart').checked = v; });
   $('setting-tray').checked = state.config.trayEnabled !== false;
   $('setting-alertbadge').checked = state.config.alertBadge !== false;
+  $('setting-tls-insecure').checked = state.config.tlsInsecure === true;
   refreshCertStatus();
   refreshGitTokenState();
   renderNotifyRules();
+  renderRegistries();
   renderUpdSettings();
 }
+
+// ─── Private registries ───────────────────────────────────────────────────────
+async function renderRegistries() {
+  const list = await api.registry.list();
+  $('registry-list').innerHTML = list.length
+    ? list.map(r => `
+        <div class="reg-row">
+          <span class="reg-host">${escHtml(r.host)}</span>
+          <span class="reg-user">${escHtml(r.username)}</span>
+          <span class="reg-ok">✓ saved</span>
+          <button class="btn btn-icon" data-reg-del="${escHtml(r.host)}" title="Remove">✕</button>
+        </div>`).join('')
+    : '<div class="form-hint" style="margin-top:0">No credentials saved — pulls and update checks run anonymously.</div>';
+
+  $('registry-list').querySelectorAll('[data-reg-del]').forEach(b =>
+    b.addEventListener('click', async () => {
+      const host = b.dataset.regDel;
+      if (!confirm(`Remove the saved credentials for ${host}?\n\nPulls and update checks for its images go back to anonymous.`)) return;
+      await api.registry.remove({ host });
+      await renderRegistries();
+      toast(`Removed credentials for ${host}`, 'info');
+    }));
+}
+
+$('registry-save-btn').addEventListener('click', async () => {
+  const host = $('registry-host').value.trim();
+  const username = $('registry-user').value.trim();
+  const password = $('registry-pass').value;
+  if (!host || !username || !password) { toast('Registry, username and token are all required', 'error'); return; }
+
+  const btn = $('registry-save-btn');
+  btn.disabled = true; btn.textContent = 'Checking…';
+  // Verify before saving — a credential that silently doesn't work is worse than none
+  const t = await api.registry.test({ host, username, password });
+  if (!t.ok) {
+    btn.disabled = false; btn.textContent = 'Add';
+    toast(t.error || 'Registry rejected those credentials', 'error', 7000);
+    return;
+  }
+  const r = await api.registry.set({ host, username, password });
+  btn.disabled = false; btn.textContent = 'Add';
+  if (!r.ok) { toast(r.error || 'Save failed', 'error'); return; }
+
+  $('registry-host').value = ''; $('registry-user').value = ''; $('registry-pass').value = '';
+  await renderRegistries();
+  toast(`Credentials for ${host} saved ✓`, 'success');
+});
 
 // ─── Notification rules ───────────────────────────────────────────────────────
 // One switch per event type. Defaults to on; the old blanket "notify me about
@@ -344,6 +393,19 @@ $('setting-alertbadge').addEventListener('change', (e) => {
   saveCfg({ alertBadge: e.target.checked });
   loadDashboard();
   toast(e.target.checked ? 'Alert count shown' : 'Alert count hidden — alerts still listed on the dashboard', 'info', 4000);
+});
+
+// TLS verification escape hatch — off means we can't tell the NAS from an impostor
+$('setting-tls-insecure').addEventListener('change', async (e) => {
+  if (e.target.checked && !confirm(
+    'Stop verifying the host certificate?\n\n' +
+    "Portside will no longer check that the host was signed by your ca.pem, which means it can't tell your NAS apart from anything else answering on that address. Only do this if re-importing your certificates didn't fix the connection.")) {
+    e.target.checked = false;
+    return;
+  }
+  saveCfg({ tlsInsecure: e.target.checked });
+  toast(e.target.checked ? '⚠️ Certificate verification disabled' : 'Certificate verification on', e.target.checked ? 'error' : 'success', 5000);
+  await loadDashboard();
 });
 
 // Theme picker

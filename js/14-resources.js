@@ -75,10 +75,18 @@ async function removeVolume(name) {
   const v = state.volumes.find(x => x.Name === name);
   const users = v ? containersForVolume(v) : [];
 
-  const warn = users.length
-    ? `Volume "${name}" is mounted by ${users.map(cName).join(', ')}.\n\n⚠️ Deleting it DESTROYS THE DATA INSIDE IT — configs, databases, everything those containers keep there.\n\nDelete it anyway?`
-    : `Delete volume "${name}"?\n\n⚠️ This permanently destroys the data inside it. Nothing is currently using it, but the data is not recoverable.`;
-  if (!confirm(warn)) return;
+  // A deleted volume takes its data with it. No undo, no bin, no re-pull.
+  const ok = await confirmDestroy({
+    title: `Delete volume "${name}"`,
+    warn: `<b>This destroys the data inside the volume</b> — configs, databases, anything a container keeps there. It cannot be recovered.` +
+      (users.length
+        ? `<br><br>It is currently mounted by ${users.map(c => `<b>${escHtml(cName(c))}</b>`).join(', ')}, which will lose it.`
+        : `<br><br>Nothing is using it right now.`),
+    items: users.map(cName),
+    phrase: name,
+    button: 'Destroy volume'
+  });
+  if (!ok) return;
 
   toast(`Deleting ${name}…`, 'info');
   let r = await api.docker.removeVolume({ ...state.config, name, force: users.length > 0 });
@@ -198,6 +206,110 @@ async function loadImages() {
   wireDeletes(el);
 }
 
+// ─── Image cleanup ────────────────────────────────────────────────────────────
+// One sheet instead of two mystery buttons. Docker's "remove unused" already
+// includes dangling images — they're a subset — so presenting them as two
+// sequential actions was a lie. Here they're two checkboxes with real sizes,
+// and we send a single prune call: the widest one that's ticked.
+function cleanupGroups() {
+  const dangling = [], unused = [];
+  for (const img of state.images) {
+    const tags = (img.RepoTags || []).filter(t => t !== '<none>:<none>');
+    if (containersForImage(img).length) continue;      // in use — never offered
+    (tags.length ? unused : dangling).push(img);
+  }
+  const size = list => list.reduce((a, i) => a + (i.Size || 0), 0);
+  return { dangling, unused, danglingSize: size(dangling), unusedSize: size(unused) };
+}
+
+function openCleanup() {
+  const g = cleanupGroups();
+  const opt = (key, checked, disabled, icon, title, size, count, sub) => `
+    <label class="cleanup-opt${disabled ? ' disabled' : ''}">
+      <input type="checkbox" data-cl="${key}"${checked ? ' checked' : ''}${disabled ? ' disabled' : ''}>
+      <span class="cleanup-body">
+        <span class="cleanup-title">${icon} ${title}
+          <span class="cleanup-size">${count ? fmt(size) : 'nothing to remove'}</span>
+        </span>
+        <span class="cleanup-sub">${sub}</span>
+      </span>
+    </label>`;
+
+  $('cleanup-options').innerHTML =
+    opt('dangling', !!g.dangling.length, !g.dangling.length, '🧹',
+        `${g.dangling.length} dangling image${g.dangling.length === 1 ? '' : 's'}`,
+        g.danglingSize, g.dangling.length,
+        'Untagged leftovers from image updates. Nothing can ever use them again — free to delete.') +
+    opt('unused', false, !g.unused.length, '🗑',
+        `${g.unused.length} unused image${g.unused.length === 1 ? '' : 's'}`,
+        g.unusedSize, g.unused.length,
+        'Tagged images no container runs. Deleting is safe, but they get pulled from the registry again next time you need them.');
+
+  $('cleanup-status').textContent = '';
+  $('cleanup-modal').classList.add('open');
+  $('cleanup-options').querySelectorAll('[data-cl]').forEach(cb =>
+    cb.addEventListener('change', updateCleanupTotal));
+  updateCleanupTotal();
+}
+
+function cleanupPicked() {
+  const picked = {};
+  $('cleanup-options').querySelectorAll('[data-cl]').forEach(cb => { picked[cb.dataset.cl] = cb.checked; });
+  return picked;
+}
+
+function updateCleanupTotal() {
+  const g = cleanupGroups();
+  const p = cleanupPicked();
+  // "unused" is the superset — ticking it removes the dangling ones too
+  const bytes = (p.unused ? g.unusedSize + g.danglingSize : 0) + (p.unused ? 0 : (p.dangling ? g.danglingSize : 0));
+  const count = (p.unused ? g.unused.length + g.dangling.length : (p.dangling ? g.dangling.length : 0));
+  $('cleanup-total').innerHTML = count
+    ? `Reclaims up to <b>${fmt(bytes)}</b> across ${count} image${count === 1 ? '' : 's'}
+       <span class="cleanup-note">— shared layers mean the real figure can be lower</span>`
+    : `<span class="cleanup-note">Nothing selected</span>`;
+  $('cleanup-go-btn').disabled = !count;
+}
+
+function closeCleanup() { $('cleanup-modal').classList.remove('open'); }
+
+$('images-cleanup-btn').addEventListener('click', openCleanup);
+$('cleanup-close-btn').addEventListener('click', closeCleanup);
+$('cleanup-cancel-btn').addEventListener('click', closeCleanup);
+$('cleanup-modal').addEventListener('click', (e) => { if (e.target === $('cleanup-modal')) closeCleanup(); });
+
+$('cleanup-go-btn').addEventListener('click', async () => {
+  const p = cleanupPicked();
+  if (!p.dangling && !p.unused) return;
+
+  // The sheet is the first decision; this is the point of no return.
+  const g = cleanupGroups();
+  const count = p.unused ? g.unused.length + g.dangling.length : g.dangling.length;
+  const what = p.unused
+    ? `${count} image${count === 1 ? '' : 's'} — including ${g.unused.length} tagged one${g.unused.length === 1 ? '' : 's'} (${g.unused.map(i => (i.RepoTags || [])[0]).filter(Boolean).slice(0, 6).join(', ')}${g.unused.length > 6 ? '…' : ''}) that must be pulled again if you want them back`
+    : `${count} dangling layer${count === 1 ? '' : 's'} — nothing can reference them`;
+  if (!confirm(`Remove ${what}?`)) return;
+
+  const btn = $('cleanup-go-btn');
+  btn.disabled = true; btn.textContent = 'Removing…';
+  $('cleanup-status').textContent = 'Asking Docker to prune…';
+
+  // One call. all=true prunes every unused image (dangling included);
+  // without it, Docker prunes dangling only.
+  const r = await api.docker.pruneImages({ ...state.config, all: !!p.unused });
+
+  btn.disabled = false; btn.textContent = 'Remove';
+  $('cleanup-status').textContent = '';
+  if (!r.ok) return toast(`Cleanup failed: ${r.error}`, 'error', 7000);
+
+  const n = ((r.data && r.data.ImagesDeleted) || []).length;
+  toast(`Removed ${n} image${n === 1 ? '' : 's'} — reclaimed ${fmt((r.data && r.data.SpaceReclaimed) || 0)}`, 'success', 6000);
+  closeCleanup();
+  state.images = []; state.dfFetched = 0;
+  await loadImages();
+  loadDashboard();
+});
+
 // ─── Volumes ──────────────────────────────────────────────────────────────────
 state.volumeFilter = 'all';
 
@@ -255,6 +367,23 @@ async function loadVolumes() {
   el.querySelectorAll('[data-vol-filter]').forEach(c =>
     c.addEventListener('click', () => { state.volumeFilter = c.dataset.volFilter; loadVolumes(); }));
   wireDeletes(el);
+}
+
+// Pruning volumes wipes every unused volume's contents at once — the single most
+// destructive button in the app. Name the victims, then make them type it.
+async function confirmVolumePrune() {
+  await ensureContainers();
+  if (!state.volumes.length) { const r = await api.docker.volumes(state.config); if (r.ok) state.volumes = (r.data && r.data.Volumes) || []; }
+  const doomed = state.volumes.filter(v => !containersForVolume(v).length);
+  if (!doomed.length) { toast('No unused volumes — nothing to prune', 'info'); return false; }
+
+  return confirmDestroy({
+    title: `Prune ${doomed.length} unused volume${doomed.length === 1 ? '' : 's'}`,
+    warn: `<b>The data inside these volumes is destroyed</b> — databases, configs, anything a container left behind. There is no undo.<br><br>Bind mounts (host folders) are not affected.`,
+    items: doomed.map(v => v.Name),
+    phrase: 'delete volumes',
+    button: `Destroy ${doomed.length} volume${doomed.length === 1 ? '' : 's'}`
+  });
 }
 
 // ─── Networks ─────────────────────────────────────────────────────────────────

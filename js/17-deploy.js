@@ -247,6 +247,7 @@ let composeSpecs = null;
 function openComposeImport() {
   composeSpecs = null;
   $('compose-yaml').value = '';
+  $('compose-project').value = '';
   $('compose-preview').innerHTML = '';
   $('compose-status').textContent = '';
   $('compose-create-btn').style.display = 'none';
@@ -282,18 +283,22 @@ async function composeParse() {
   $('compose-status').textContent = '';
   if (!r.ok) { $('compose-preview').innerHTML = ''; $('compose-create-btn').style.display = 'none'; composeSpecs = null; toast(r.error || 'Parse failed', 'error', 6000); return; }
   composeSpecs = r.services;
+  // compose's own top-level `name:` wins; otherwise leave it to the user
+  if (r.project && !$('compose-project').value.trim()) $('compose-project').value = r.project;
   composePreview(r.services, r.warnings);
   $('compose-create-btn').style.display = '';
 }
 
 async function composeCreate() {
   if (!composeSpecs || !composeSpecs.length) { toast('Preview a valid compose file first', 'error'); return; }
+  const project = $('compose-project').value.trim();
   const btn = $('compose-create-btn');
   btn.disabled = true;
   let ok = 0, fail = 0;
   for (const spec of composeSpecs) {
     $('compose-status').textContent = 'Creating ' + spec.name + '…';
-    const r = await api.deploy.create({ ...state.config, spec });
+    // project → compose labels → Portside groups them as a stack
+    const r = await api.deploy.create({ ...state.config, spec: { ...spec, project } });
     if (r && r.ok) ok++; else { fail++; toast(`${spec.name}: ${(r && r.error) || 'failed'}`, 'error', 7000); }
   }
   btn.disabled = false;

@@ -44,6 +44,8 @@ issues, and keep your expectations calibrated to "a guy and his AI made this in 
 - 🧹 **Resource pages** — images, volumes and networks show what's *in use* vs *unused* vs *dangling*, with per-object delete (not just all-or-nothing prune)
 - 🎚 **Resource limits** — set a memory cap and CPU quota when deploying or editing, so one runaway container can't take the NAS down
 - 🔔 **Notification rules** — choose exactly which events interrupt you (crash, unhealthy, restart loop, image update, GitHub release, expiring certs)
+- 💥 **Crash logs** — when a container dies, Portside snapshots its logs *at that moment*, so the evidence survives the container being recreated
+- 🔑 **Private registries** — credentials stored in your Keychain, for private images and to lift Docker Hub's anonymous pull limit
 - ⬆️ **Image update checker** — compares your containers' image digests against the registry (built-in Watchtower, but you stay in control) with one-click pull & recreate + rollback
 - >_ **Terminal** — exec into any running container, full xterm with colors
 - 📁 **File Browser** — browse mapped volumes (or the full container fs), download, upload, and **edit config files in-app**
@@ -95,10 +97,12 @@ npm run build      # build the .app / .dmg into dist/
 ## How it works (as explained to me)
 
 Plain Electron — no frameworks, no build step, a main process that talks to the Docker
-Engine API directly over TLS. Terminal sessions use the exec API with a hijacked TCP
-stream, the file browser rides the archive API with a hand-rolled tar parser, and the
-update checker does registry digest comparisons with proper bearer-token auth. The menu
-bar panel is a frameless vibrancy window. Your certs and config never leave your machine.
+Engine API directly over TLS (the host's certificate is verified against your imported
+`ca.pem`, so Portside can tell your NAS from anything else answering on that address).
+Terminal sessions use the exec API with a hijacked TCP stream, the file browser rides the
+archive API with a hand-rolled tar parser, and the update checker does registry digest
+comparisons with proper bearer-token auth. The menu bar panel is a frameless vibrancy
+window. Your certs, registry credentials and config never leave your machine.
 
 ```
 main.js          Electron main process — all Docker API calls, TLS, IPC handlers

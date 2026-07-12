@@ -28,19 +28,56 @@ function certsDirForHost(hostIp) {
   return activeCertsDir();
 }
 
+// The client cert proves US to the NAS. This verifies the NAS to US — without it,
+// anything on the LAN that answers on <ip>:2376 receives our client certificate
+// and our commands.
+//
+// We can't use Node's default hostname check: QNAP's Docker cert is issued to the
+// NAS's own name, and we connect by IP, so the identity check fails even though
+// the certificate is perfectly valid. So we verify the CHAIN against the ca.pem
+// the user imported (rejectUnauthorized: true) and relax only the NAME check.
+// A chain signed by the imported CA is exactly the guarantee we want: it means
+// we're talking to the machine those certs came from.
+//
+// tlsInsecure in config is the escape hatch for anyone whose certs don't chain
+// (e.g. regenerated on the NAS but not re-imported here) — off by default.
 function createAgent(hostIp) {
   const certsDir = hostIp ? certsDirForHost(hostIp) : activeCertsDir();
+  let insecure = false;
+  try { insecure = loadConfig().tlsInsecure === true; } catch {}
   try {
     return new https.Agent({
       ca:   fs.readFileSync(path.join(certsDir, 'ca.pem')),
       cert: fs.readFileSync(path.join(certsDir, 'cert.pem')),
       key:  fs.readFileSync(path.join(certsDir, 'key.pem')),
-      rejectUnauthorized: false  // QNAP self-signed CA
+      rejectUnauthorized: !insecure,
+      // chain still verified; only the IP-vs-CN name match is waived
+      checkServerIdentity: () => undefined
     });
   } catch (e) {
     console.error('Failed to load certs:', e.message);
     return null;
   }
+}
+
+// Turn Node's TLS error codes into something a human can act on
+const TLS_HINTS = {
+  UNABLE_TO_VERIFY_LEAF_SIGNATURE: 'the NAS presented a certificate that your ca.pem did not sign',
+  SELF_SIGNED_CERT_IN_CHAIN:       'the NAS presented a self-signed certificate your ca.pem did not sign',
+  DEPTH_ZERO_SELF_SIGNED_CERT:     'the NAS presented a self-signed certificate your ca.pem did not sign',
+  CERT_HAS_EXPIRED:                'the NAS certificate has expired',
+  ERR_TLS_CERT_ALTNAME_INVALID:    'the NAS certificate does not cover this address'
+};
+function tlsFriendlyError(e) {
+  const hint = TLS_HINTS[e.code];
+  if (!hint) return e;
+  const err = new Error(
+    `Couldn't verify the NAS: ${hint}.\n\n` +
+    `Re-import the certificates from Container Station (Settings → TLS Certificates). ` +
+    `If they're definitely right, you can disable verification in Settings — but then Portside can't tell your NAS apart from anything else on the network.`
+  );
+  err.code = e.code;
+  return err;
 }
 
 // ─── Config Store (simple JSON file) ──────────────────────────────────────────
@@ -90,7 +127,7 @@ function dockerRequest(opts, body = null) {
       });
     });
 
-    req.on('error', reject);
+    req.on('error', (e) => reject(tlsFriendlyError(e)));
     req.setTimeout(opts.timeout || 8000, () => { req.destroy(new Error('Request timeout')); });
 
     if (body) req.write(JSON.stringify(body));
@@ -369,10 +406,20 @@ ipcMain.handle('deploy:create', async (_, { host, port, spec }) => {
       PortBindings[key] = [{ HostPort: String(p.host || p.cont) }];
     }
     const Binds = (spec.volumes || []).filter(v => v.host && v.cont).map(v => `${v.host}:${v.cont}`);
+
+    // If the caller named a stack, stamp the same labels `docker compose up`
+    // would — that's what makes Portside (and `docker compose ps`, and anything
+    // else that reads them) treat these containers as one project.
+    const Labels = { ...(spec.labels || {}) };
+    if (spec.project) {
+      Labels['com.docker.compose.project'] = spec.project;
+      Labels['com.docker.compose.service'] = spec.service || spec.name;
+    }
+
     const payload = {
       Image: spec.image,
       Cmd: (Array.isArray(spec.command) && spec.command.length) ? spec.command : undefined,
-      Labels: (spec.labels && Object.keys(spec.labels).length) ? spec.labels : undefined,
+      Labels: Object.keys(Labels).length ? Labels : undefined,
       Env: (spec.env || []).filter(s => s && s.includes('=')),
       ExposedPorts: Object.keys(ExposedPorts).length ? ExposedPorts : undefined,
       HostConfig: {
@@ -480,10 +527,15 @@ function normalizeCompose(doc) {
     const cpuStr = s.cpus != null ? s.cpus : dl.cpus;
     const cpus = cpuStr != null && !isNaN(parseFloat(cpuStr)) ? parseFloat(cpuStr) : undefined;
 
-    services.push({ name: s.container_name || name, image: String(s.image), ports, volumes, env, command, labels, restart, network, memory, cpus });
+    // `service` is the YAML key — kept so imported containers can carry the same
+    // compose labels a real `docker compose up` would set, and therefore group
+    // as a stack in Portside.
+    services.push({ name: s.container_name || name, service: name, image: String(s.image), ports, volumes, env, command, labels, restart, network, memory, cpus });
   }
   if (!services.length) throw new Error('No usable services with an image: were found.');
-  return { services, warnings };
+  // compose's own top-level `name:` is the project name, when present
+  const project = typeof doc.name === 'string' && doc.name.trim() ? doc.name.trim() : '';
+  return { services, warnings, project };
 }
 
 ipcMain.handle('compose:parse', (_, { yaml: text }) => {
@@ -771,6 +823,76 @@ ipcMain.handle('docker:logs', async (_, { host, port, id }) => {
   }
 });
 
+// ─── Crash log snapshots ──────────────────────────────────────────────────────
+// When a container dies, Portside tells you it crashed and suggests checking the
+// logs — but if the container gets recreated (auto-update, edit, redeploy) those
+// logs are gone, and the evidence went with them. So the moment we DETECT the
+// crash, we grab the tail and keep our own copy on disk.
+const CRASHLOG_KEEP = 40;
+function crashLogDir() {
+  const d = path.join(app.getPath('userData'), 'crashlogs');
+  if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true });
+  return d;
+}
+function crashLogIndexPath() { return path.join(crashLogDir(), 'index.json'); }
+function crashLogIndex() {
+  try { return JSON.parse(fs.readFileSync(crashLogIndexPath(), 'utf8')); } catch { return []; }
+}
+function writeCrashLogIndex(list) {
+  fs.writeFileSync(crashLogIndexPath(), JSON.stringify(list, null, 2));
+}
+
+ipcMain.handle('crashlog:save', (_, { name, containerId, exitCode, status, text }) => {
+  try {
+    const time = Date.now();
+    const file = `${String(name || 'container').replace(/[^\w.-]/g, '_')}-${time}.log`;
+    const header =
+      `# ${name} — crashed ${new Date(time).toLocaleString()}\n` +
+      `# exit code: ${exitCode == null ? '?' : exitCode}\n` +
+      `# status: ${status || ''}\n` +
+      `# container: ${containerId || ''}\n` +
+      `# captured by Portside the moment the crash was detected — the container may since have been recreated\n\n`;
+    fs.writeFileSync(path.join(crashLogDir(), file), header + (text || '(no log output)'), 'utf8');
+
+    const list = crashLogIndex();
+    list.unshift({ file, name, containerId, exitCode, status, time });
+
+    // Trim old ones so this can't grow forever
+    const keep = list.slice(0, CRASHLOG_KEEP);
+    for (const old of list.slice(CRASHLOG_KEEP)) {
+      try { fs.unlinkSync(path.join(crashLogDir(), old.file)); } catch {}
+    }
+    writeCrashLogIndex(keep);
+    return { ok: true, file };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+});
+
+ipcMain.handle('crashlog:list', () => crashLogIndex());
+
+ipcMain.handle('crashlog:get', (_, { file }) => {
+  try {
+    // never let a crafted name escape the crashlog dir
+    const safe = path.basename(String(file || ''));
+    return { ok: true, text: fs.readFileSync(path.join(crashLogDir(), safe), 'utf8') };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+});
+
+ipcMain.handle('crashlog:remove', (_, { file }) => {
+  try {
+    const list = crashLogIndex();
+    const targets = file ? [path.basename(String(file))] : list.map(x => x.file);
+    for (const f of targets) { try { fs.unlinkSync(path.join(crashLogDir(), f)); } catch {} }
+    writeCrashLogIndex(file ? list.filter(x => x.file !== path.basename(String(file))) : []);
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+});
+
 ipcMain.handle('docker:action', async (_, { host, port, id, action }) => {
   const methodMap = { start: 'POST', stop: 'POST', restart: 'POST', remove: 'DELETE' };
   const pathMap = {
@@ -935,6 +1057,76 @@ function parseImageRef(image) {
   return { host, repo, tag };
 }
 
+// ─── Private registry credentials ────────────────────────────────────────────
+// Stored in config as { host, username, secret } with the secret encrypted via
+// safeStorage (macOS Keychain), same as the Git Deploy token. Two uses:
+//   • update checks — the registry token request gets Basic auth, so private
+//     repos answer at all, and Docker Hub stops rate-limiting us as "anonymous"
+//   • pulls — Docker itself needs the creds, passed as X-Registry-Auth
+function normReg(h) {
+  const s = String(h || '').trim().toLowerCase().replace(/^https?:\/\//, '').replace(/\/$/, '');
+  if (!s || s === 'docker.io' || s === 'index.docker.io' || s === 'registry-1.docker.io') return 'registry-1.docker.io';
+  return s;
+}
+function regCredsFor(registryHost) {
+  try {
+    const list = loadConfig().registries || [];
+    const r = list.find(x => normReg(x.host) === normReg(registryHost));
+    if (!r) return null;
+    const password = decToken(r.secret || '');
+    if (!r.username || !password) return null;
+    return { username: r.username, password };
+  } catch { return null; }
+}
+// Docker wants the legacy index URL as serveraddress for Hub, the bare host otherwise
+function regServerAddress(registryHost) {
+  return normReg(registryHost) === 'registry-1.docker.io'
+    ? 'https://index.docker.io/v1/'
+    : normReg(registryHost);
+}
+function registryAuthHeader(image) {
+  const { host } = parseImageRef(image);
+  const creds = regCredsFor(host);
+  if (!creds) return null;
+  const payload = { username: creds.username, password: creds.password, serveraddress: regServerAddress(host) };
+  return Buffer.from(JSON.stringify(payload), 'utf8').toString('base64');
+}
+
+ipcMain.handle('registry:list', () => {
+  try {
+    return (loadConfig().registries || []).map(r => ({ host: r.host, username: r.username }));
+  } catch { return []; }
+});
+ipcMain.handle('registry:set', (_, { host, username, password }) => {
+  if (!host || !username || !password) return { ok: false, error: 'Registry, username and token are all required' };
+  const cfg = loadConfig();
+  const list = (cfg.registries || []).filter(r => normReg(r.host) !== normReg(host));
+  list.push({ host: String(host).trim(), username: String(username).trim(), secret: encToken(String(password)) });
+  cfg.registries = list;
+  saveConfig(cfg);
+  return { ok: true };
+});
+ipcMain.handle('registry:remove', (_, { host }) => {
+  const cfg = loadConfig();
+  cfg.registries = (cfg.registries || []).filter(r => normReg(r.host) !== normReg(host));
+  saveConfig(cfg);
+  return { ok: true };
+});
+// Verify a credential actually works before we save it
+ipcMain.handle('registry:test', async (_, { host, username, password }) => {
+  try {
+    const reg = normReg(host);
+    const basic = 'Basic ' + Buffer.from(`${username}:${password}`, 'utf8').toString('base64');
+    // Hitting /v2/ tells us whether the credential is accepted at all
+    const res = await regRequest('GET', `https://${reg}/v2/`, { Authorization: basic });
+    if (res.status === 401 || res.status === 403) return { ok: false, error: 'Registry rejected those credentials' };
+    if (res.status >= 400 && res.status !== 404) return { ok: false, error: 'Registry HTTP ' + res.status };
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+});
+
 // GET (not HEAD) so we also see the manifest LIST body. A multi-arch tag has
 // one digest for the list AND one per platform — depending on Docker version
 // and how the image was pulled, the local RepoDigests may store EITHER. Only
@@ -951,12 +1143,29 @@ async function remoteManifest(image) {
     const realm = (/realm="([^"]+)"/.exec(wa) || [])[1];
     const service = (/service="([^"]+)"/.exec(wa) || [])[1];
     if (!realm) throw new Error('Auth required');
-    const tr = await regRequest('GET', `${realm}?service=${encodeURIComponent(service || '')}&scope=${encodeURIComponent(`repository:${repo}:pull`)}`);
+
+    // Saved credentials for this registry → ask for a token AS that user. Without
+    // this, private repos 401 forever and Docker Hub counts us against the
+    // anonymous pull limit.
+    const creds = regCredsFor(host);
+    const tokenHeaders = creds
+      ? { Authorization: 'Basic ' + Buffer.from(`${creds.username}:${creds.password}`, 'utf8').toString('base64') }
+      : {};
+
+    const tr = await regRequest('GET',
+      `${realm}?service=${encodeURIComponent(service || '')}&scope=${encodeURIComponent(`repository:${repo}:pull`)}`,
+      tokenHeaders);
     const tok = JSON.parse(tr.body || '{}');
     const token = tok.token || tok.access_token;
-    if (!token) throw new Error('Token fetch failed');
+    if (!token) throw new Error(creds ? 'Registry rejected the saved credentials' : 'Token fetch failed');
     res = await regRequest('GET', url, { Accept: accept, Authorization: `Bearer ${token}` });
   }
+  if (res.status === 401 || res.status === 403)
+    throw new Error(regCredsFor(host)
+      ? 'Registry denied access — check the credentials in Settings → Registries'
+      : 'Private image — add credentials in Settings → Registries');
+  if (res.status === 429)
+    throw new Error('Registry rate limit hit — add credentials in Settings → Registries to lift it');
   if (res.status !== 200) throw new Error('Registry HTTP ' + res.status);
   const digest = res.headers['docker-content-digest'] || null;
   let platforms = [];
@@ -1022,10 +1231,17 @@ function pullImage(host, port, image) {
     let repo = ref, tag = 'latest';
     const ti = ref.lastIndexOf(':');
     if (ti > ref.lastIndexOf('/')) { tag = ref.slice(ti + 1); repo = ref.slice(0, ti); }
+    // Hand Docker the registry credentials, if we have any for this image's
+    // registry — otherwise private pulls fail on the NAS side, where we can't
+    // see why.
+    const headers = { 'Content-Length': 0 };
+    const auth = registryAuthHeader(image);
+    if (auth) headers['X-Registry-Auth'] = auth;
+
     const req = https.request({
       hostname: host, port: port || 2376,
       path: `/images/create?fromImage=${encodeURIComponent(repo)}&tag=${encodeURIComponent(tag)}`,
-      method: 'POST', agent, headers: { 'Content-Length': 0 }
+      method: 'POST', agent, headers
     }, (res) => {
       let tail = '';
       res.on('data', d => { tail += d.toString(); if (tail.length > 2e5) tail = tail.slice(-5e4); });

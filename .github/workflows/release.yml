@@ -26,6 +26,11 @@ jobs:
       - name: Install dependencies
         run: npm install --no-audit --no-fund
 
+      # If the renderer is broken, the build still "succeeds" — it just ships a
+      # white window. Fail here instead.
+      - name: Test
+        run: npm test
+
       - name: Build macOS app (unsigned; --publish never so the release step below does the publishing)
         run: npm run build -- --publish never
         env:

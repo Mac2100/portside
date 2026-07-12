@@ -85,6 +85,12 @@ contextBridge.exposeInMainWorld('portside', {
     parse: (args) => ipcRenderer.invoke('compose:parse', args)
   },
   exportSave: (args) => ipcRenderer.invoke('export:save', args),
+  registry: {
+    list:   () => ipcRenderer.invoke('registry:list'),
+    set:    (args) => ipcRenderer.invoke('registry:set', args),
+    remove: (args) => ipcRenderer.invoke('registry:remove', args),
+    test:   (args) => ipcRenderer.invoke('registry:test', args)
+  },
   gitdeploy: {
     list:       () => ipcRenderer.invoke('gitdeploy:list'),
     get:        (args) => ipcRenderer.invoke('gitdeploy:get', args),
@@ -95,6 +101,12 @@ contextBridge.exposeInMainWorld('portside', {
     tokenState: () => ipcRenderer.invoke('gitdeploy:token-state'),
     tokenSet:   (args) => ipcRenderer.invoke('gitdeploy:token-set', args),
     tokenClear: () => ipcRenderer.invoke('gitdeploy:token-clear')
+  },
+  crashlog: {
+    save:   (args) => ipcRenderer.invoke('crashlog:save', args),
+    list:   () => ipcRenderer.invoke('crashlog:list'),
+    get:    (args) => ipcRenderer.invoke('crashlog:get', args),
+    remove: (args) => ipcRenderer.invoke('crashlog:remove', args)
   },
   logs: {
     start:  (args) => ipcRenderer.invoke('logs:start', args),

@@ -53,6 +53,17 @@ function selectedFor(action) {
     clearSelection();
   }));
 
+// Group the selection: opens the group modal with those containers pre-ticked,
+// so you can drop them into a new group or an existing one in one step.
+$('bulk-group').addEventListener('click', () => {
+  const names = [...state.selection]
+    .map(id => state.containers.find(c => c.Id === id))
+    .filter(Boolean)
+    .map(c => sanitizeName(c.Names && c.Names[0]));
+  if (!names.length) return;
+  openGroupModal(null, names);
+});
+
 $('bulk-clear').addEventListener('click', clearSelection);
 
 // ─── Container Table ──────────────────────────────────────────────────────────
@@ -245,9 +256,19 @@ async function runBulkAction(ids, action, what) {
     const c = state.containers.find(x => x.Id === id);
     return c ? sanitizeName(c.Names && c.Names[0]) : id.slice(0, 12);
   };
-  const extra = action === 'remove'
-    ? '\n\nThe containers are deleted. Data in volumes and bind mounts is kept.' : '';
-  if (!confirm(`${v[0]} ${n} container${n > 1 ? 's' : ''}${what ? ` in ${what}` : ''}?\n\n${ids.map(nameOf).join(', ')}${extra}`)) return;
+  const names = ids.map(nameOf);
+
+  if (action === 'remove') {
+    // Removing is the one action you can't take back — ask twice.
+    const ok = confirmDestructive(
+      `Remove ${n} container${n > 1 ? 's' : ''}${what ? ` in ${what}` : ''}?`,
+      `${names.join(', ')}\n\nThe containers are deleted. Data in volumes and bind mounts is kept, but the containers themselves — their config, ports and logs — are gone.`,
+      `Delete ${n === 1 ? names[0] : `these ${n} containers`}:\n${names.join(', ')}`
+    );
+    if (!ok) return;
+  } else if (!confirm(`${v[0]} ${n} container${n > 1 ? 's' : ''}${what ? ` in ${what}` : ''}?\n\n${names.join(', ')}`)) {
+    return;
+  }
 
   toast(`${v[1]} ${n} container${n > 1 ? 's' : ''}…`, 'info', 6000);
   const failed = [];
@@ -360,21 +381,38 @@ document.querySelectorAll('#cview-picker .seg-btn').forEach(b =>
 // ─── Group create/edit modal ──────────────────────────────────────────────────
 let groupOrigName = null;
 
-function openGroupModal(existing) {
+// preselect: container names to tick on open (used by the bulk "Group" button)
+function openGroupModal(existing, preselect = []) {
   groupOrigName = existing || null;
-  $('group-title').textContent = existing ? `Edit group — ${existing}` : 'New group';
+  const pre = new Set(preselect);
+  $('group-title').textContent = existing ? `Edit group — ${existing}`
+    : pre.size ? `New group — ${pre.size} container${pre.size > 1 ? 's' : ''} selected`
+    : 'New group';
   $('group-name').value = existing || '';
   $('group-delete-btn').style.display = existing ? '' : 'none';
 
   const map = state.config.gcGroups || {};
+
+  // Existing groups → a datalist, so the name field doubles as "add to existing"
+  const existingGroups = [...new Set(Object.values(map))].sort();
+  $('group-name-list').innerHTML = existingGroups.map(g => `<option value="${escHtml(g)}">`).join('');
+  $('group-existing-hint').style.display = (!existing && existingGroups.length) ? '' : 'none';
+  $('group-existing-hint').innerHTML = existingGroups.length
+    ? `Type a new name, or pick an existing one to add them to it: ${existingGroups.map(g =>
+        `<span class="grp-chip" data-grp-pick="${escHtml(g)}">${escHtml(g)}</span>`).join('')}`
+    : '';
+
   const names = [...new Set(state.containers.map(c => sanitizeName(c.Names && c.Names[0])))].sort();
   $('group-members').innerHTML = names.length
     ? names.map(n => {
-        const inThis = existing && map[n] === existing;
+        const inThis = (existing && map[n] === existing) || pre.has(n);
         const elsewhere = map[n] && map[n] !== existing ? ` <span class="text-muted" style="font-size:11px">— currently in ${escHtml(map[n])}</span>` : '';
         return `<label class="upd-auto-row"><input type="checkbox" data-gm="${escHtml(n)}"${inThis ? ' checked' : ''}> ${escHtml(n)}${elsewhere}</label>`;
       }).join('')
     : '<div class="form-hint">No containers found — connect to a host first.</div>';
+
+  $('group-existing-hint').querySelectorAll('[data-grp-pick]').forEach(chip =>
+    chip.addEventListener('click', () => { $('group-name').value = chip.dataset.grpPick; $('group-name').focus(); }));
 
   $('group-modal').classList.add('open');
   setTimeout(() => $('group-name').focus(), 30);
@@ -401,6 +439,7 @@ $('group-save-btn').addEventListener('click', () => {
   }
   saveCfg({ gcGroups: map });
   closeGroupModal();
+  clearSelection();            // the selection did its job — don't leave it hanging
   renderContainersList();
   toast(`Group "${name}" saved`, 'success');
 });

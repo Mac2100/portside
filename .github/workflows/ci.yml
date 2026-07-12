@@ -1,0 +1,31 @@
+name: Tests
+
+# Runs on every push and pull request to main — so a broken renderer is caught
+# when it's pushed, not when it's tagged for release.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest   # no Electron build here, just the renderer checks
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      # Electron's postinstall downloads a ~100MB binary we don't need to run
+      # tests — skip it and keep this job fast.
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: 1
+
+      - name: Test
+        run: npm test

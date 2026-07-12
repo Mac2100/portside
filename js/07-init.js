@@ -3,6 +3,7 @@ async function init() {
   state.config = await api.config.load();
   migrateHosts();
   migrateNotifyRules();
+  await refreshCrashLogs();   // so Insights can offer logs for crashes from earlier sessions
 
   applyTheme(state.config.theme || 'system');
   applyLogo(state.config.logo || 'teal');

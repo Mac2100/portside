@@ -9,6 +9,65 @@ function escHtml(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, ch =>
 // Form number → number, where blank/garbage means 0 ("no limit"), never NaN
 function numOrZero(v) { const n = parseFloat(v); return isFinite(n) && n > 0 ? n : 0; }
 
+// ─── Destructive confirmation ────────────────────────────────────────────────
+// Anything that destroys something asks twice: the first dialog says what will
+// happen, the second is the point of no return. Two dialogs is annoying by
+// design — muscle memory clicks through one, not two with different wording.
+//
+// Used for containers, which can be recreated. For data that CANNOT come back
+// (volumes) use confirmDestroy() below, which makes you type the name.
+function confirmDestructive(what, detail, finalLine) {
+  if (!confirm(`${what}\n\n${detail}`)) return false;
+  return confirm(`⚠️ Last chance — this cannot be undone.\n\n${finalLine}`);
+}
+
+// Type-to-confirm. Returns a promise → true only if the exact phrase was typed.
+// Clicking OK twice is a reflex; typing "plexdata" is a decision.
+function confirmDestroy({ title, warn, items = [], phrase, button = 'Delete permanently' }) {
+  return new Promise(resolve => {
+    $('destroy-title').textContent = title;
+    $('destroy-warn').innerHTML = warn;
+    $('destroy-list').innerHTML = items.length
+      ? items.map(i => `<div class="destroy-item">${escHtml(i)}</div>`).join('')
+      : '';
+    $('destroy-list').style.display = items.length ? '' : 'none';
+    $('destroy-phrase-label').textContent = phrase;
+    $('destroy-go-btn').textContent = button;
+
+    const input = $('destroy-phrase');
+    const go = $('destroy-go-btn');
+    input.value = '';
+    input.placeholder = phrase;
+    go.disabled = true;
+
+    const check = () => { go.disabled = input.value.trim() !== phrase; };
+    const done = (ok) => {
+      input.removeEventListener('input', check);
+      go.removeEventListener('click', onGo);
+      $('destroy-cancel-btn').removeEventListener('click', onCancel);
+      $('destroy-close-btn').removeEventListener('click', onCancel);
+      input.removeEventListener('keydown', onKey);
+      $('destroy-modal').classList.remove('open');
+      resolve(ok);
+    };
+    const onGo = () => { if (!go.disabled) done(true); };
+    const onCancel = () => done(false);
+    const onKey = (e) => {
+      if (e.key === 'Enter' && !go.disabled) onGo();
+      if (e.key === 'Escape') onCancel();
+    };
+
+    input.addEventListener('input', check);
+    go.addEventListener('click', onGo);
+    $('destroy-cancel-btn').addEventListener('click', onCancel);
+    $('destroy-close-btn').addEventListener('click', onCancel);
+    input.addEventListener('keydown', onKey);
+
+    $('destroy-modal').classList.add('open');
+    setTimeout(() => input.focus(), 30);
+  });
+}
+
 // ─── Notifications ────────────────────────────────────────────────────────────
 // Every desktop notification in the app goes through notify(). One switch per
 // event type, configured in Settings → Notifications, so a container that
