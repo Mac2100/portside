@@ -19,7 +19,10 @@ contextBridge.exposeInMainWorld('portside', {
     pruneImages:     (args) => ipcRenderer.invoke('docker:prune-images', args),
     pruneContainers: (args) => ipcRenderer.invoke('docker:prune-containers', args),
     pruneVolumes:    (args) => ipcRenderer.invoke('docker:prune-volumes', args),
-    recreate:        (args) => ipcRenderer.invoke('docker:recreate', args)
+    recreate:        (args) => ipcRenderer.invoke('docker:recreate', args),
+    removeImage:     (args) => ipcRenderer.invoke('docker:remove-image', args),
+    removeVolume:    (args) => ipcRenderer.invoke('docker:remove-volume', args),
+    removeNetwork:   (args) => ipcRenderer.invoke('docker:remove-network', args)
   },
   github: {
     latestRelease: (args) => ipcRenderer.invoke('github:latest-release', args)
@@ -81,6 +84,7 @@ contextBridge.exposeInMainWorld('portside', {
   compose: {
     parse: (args) => ipcRenderer.invoke('compose:parse', args)
   },
+  exportSave: (args) => ipcRenderer.invoke('export:save', args),
   gitdeploy: {
     list:       () => ipcRenderer.invoke('gitdeploy:list'),
     get:        (args) => ipcRenderer.invoke('gitdeploy:get', args),

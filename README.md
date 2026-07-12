@@ -37,7 +37,13 @@ issues, and keep your expectations calibrated to "a guy and his AI made this in 
 ## What it does
 
 - 📊 **Dashboard** — host CPU/memory rings, network throughput, live history charts (Live / 24h / 7d, persisted to disk), top-consumer leaderboards
-- 💡 **Insights** — crash detection with exit codes, restart loops, health checks, high CPU/memory alerts, network & disk hogs, dangling-image prune button
+- 💡 **Insights** — an action list, not a metrics feed: crashes with exit codes, restart loops, failing health checks, pending updates, and reclaimable junk. Nothing that appears and vanishes on its own
+- 🧱 **Stacks** — compose projects are grouped automatically from their labels, with start/stop/restart for the whole stack
+- ☑️ **Bulk actions** — select any set of containers and start/stop/restart/remove them in one go
+- 📦 **Export** — rebuild any container anywhere: export its live config as `compose.yml` or a `docker run` command
+- 🧹 **Resource pages** — images, volumes and networks show what's *in use* vs *unused* vs *dangling*, with per-object delete (not just all-or-nothing prune)
+- 🎚 **Resource limits** — set a memory cap and CPU quota when deploying or editing, so one runaway container can't take the NAS down
+- 🔔 **Notification rules** — choose exactly which events interrupt you (crash, unhealthy, restart loop, image update, GitHub release, expiring certs)
 - ⬆️ **Image update checker** — compares your containers' image digests against the registry (built-in Watchtower, but you stay in control) with one-click pull & recreate + rollback
 - >_ **Terminal** — exec into any running container, full xterm with colors
 - 📁 **File Browser** — browse mapped volumes (or the full container fs), download, upload, and **edit config files in-app**
@@ -88,17 +94,30 @@ npm run build      # build the .app / .dmg into dist/
 
 ## How it works (as explained to me)
 
-Plain Electron — no frameworks, one HTML file, a main process that talks to the Docker
+Plain Electron — no frameworks, no build step, a main process that talks to the Docker
 Engine API directly over TLS. Terminal sessions use the exec API with a hijacked TCP
 stream, the file browser rides the archive API with a hand-rolled tar parser, and the
 update checker does registry digest comparisons with proper bearer-token auth. The menu
 bar panel is a frameless vibrancy window. Your certs and config never leave your machine.
 
+```
+main.js          Electron main process — all Docker API calls, TLS, IPC handlers
+preload.js       the contextBridge: the only surface the UI can reach
+index.html       markup only
+css/app.css      all styles
+js/NN-*.js       the renderer, loaded in order; plain scripts sharing one scope
+test/            npm test — smoke test (no deps) + jsdom boot test
+```
+
+`npm test` parses every renderer script, checks that every `$('id')` resolves, then boots
+the whole UI in jsdom against a fake Docker host and asserts the pages render. It's what
+stands between me and shipping a white window.
+
 ## Disclaimers
 
 - Not affiliated with Docker, QNAP, Portainer, or the *arr projects
 - The container update feature recreates containers (config and volumes are preserved, old container logs are not)
-- An AI wrote this. A human (me) merely yelled directions and clicked "yes". Review the code before trusting it with anything important — it's ~3,000 lines and honestly pretty readable
+- An AI wrote this. A human (me) merely yelled directions and clicked "yes". Review the code before trusting it with anything important — it's a few thousand lines and honestly pretty readable
 
 ## License
 

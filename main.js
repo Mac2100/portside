@@ -379,7 +379,11 @@ ipcMain.handle('deploy:create', async (_, { host, port, spec }) => {
         PortBindings: Object.keys(PortBindings).length ? PortBindings : undefined,
         Binds: Binds.length ? Binds : undefined,
         RestartPolicy: spec.restart && spec.restart !== 'no' ? { Name: spec.restart } : undefined,
-        NetworkMode: spec.network || undefined
+        NetworkMode: spec.network || undefined,
+        // Resource limits. Memory arrives in MB, CPUs as a float (1.5 = one and a
+        // half cores); Docker wants bytes and nanocpus.
+        Memory: spec.memory ? Math.round(spec.memory * 1024 * 1024) : undefined,
+        NanoCpus: spec.cpus ? Math.round(spec.cpus * 1e9) : undefined
       }
     };
     const cr = await dockerRequest({
@@ -462,7 +466,21 @@ function normalizeCompose(doc) {
       ? (['no', 'always', 'on-failure', 'unless-stopped'].includes(String(s.restart)) ? String(s.restart) : 'unless-stopped')
       : undefined;
 
-    services.push({ name: s.container_name || name, image: String(s.image), ports, volumes, env, command, labels, restart, network });
+    // limits: mem_limit / cpus (compose v2 style) or deploy.resources.limits (v3)
+    const dl = (s.deploy && s.deploy.resources && s.deploy.resources.limits) || {};
+    const memStr = s.mem_limit || dl.memory;
+    let memory;
+    if (memStr != null) {
+      const m = /^([\d.]+)\s*([kmg])?b?$/i.exec(String(memStr).trim());
+      if (m) {
+        const mult = { k: 1 / 1024, m: 1, g: 1024 }[(m[2] || 'm').toLowerCase()] || 1;
+        memory = Math.round(parseFloat(m[1]) * mult);            // → MB
+      } else warnings.push(`"${name}": couldn't read mem_limit "${memStr}" — no memory limit applied.`);
+    }
+    const cpuStr = s.cpus != null ? s.cpus : dl.cpus;
+    const cpus = cpuStr != null && !isNaN(parseFloat(cpuStr)) ? parseFloat(cpuStr) : undefined;
+
+    services.push({ name: s.container_name || name, image: String(s.image), ports, volumes, env, command, labels, restart, network, memory, cpus });
   }
   if (!services.length) throw new Error('No usable services with an image: were found.');
   return { services, warnings };
@@ -1327,6 +1345,69 @@ ipcMain.handle('docker:prune-volumes', async (_, { host, port }) => {
   }
 });
 
+// ─── Save exported text (docker run / compose YAML) to a file ────────────────
+ipcMain.handle('export:save', async (e, { name, content }) => {
+  try {
+    const win = BrowserWindow.fromWebContents(e.sender);
+    const { canceled, filePath } = await dialog.showSaveDialog(win, {
+      title: 'Save export',
+      defaultPath: path.join(app.getPath('downloads'), name),
+      filters: name.endsWith('.yml')
+        ? [{ name: 'Compose file', extensions: ['yml', 'yaml'] }]
+        : [{ name: 'Shell script', extensions: ['sh', 'txt'] }]
+    });
+    if (canceled || !filePath) return { ok: false, canceled: true };
+    fs.writeFileSync(filePath, content, 'utf8');
+    return { ok: true, path: filePath };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
+// ─── Single-object delete (images / volumes / networks) ──────────────────────
+// Prune is all-or-nothing; these let you remove exactly one thing. Docker
+// returns 409 when something is still in use — we surface that message as-is
+// so the UI can offer "force" where forcing is actually safe.
+ipcMain.handle('docker:remove-image', async (_, { host, port, id, force }) => {
+  try {
+    // We always pass an image ID. Strip the "sha256:" prefix and don't URL-encode
+    // it — the remaining hex is path-safe, and encoding the colon confuses the
+    // API's route matching.
+    const ref = String(id).replace(/^sha256:/, '');
+    const r = await dockerRequest({
+      host, port, method: 'DELETE', timeout: 60000,
+      path: `/images/${ref}${force ? '?force=true' : ''}`
+    });
+    if (r.status >= 400) return { ok: false, status: r.status, error: (r.body && r.body.message) || 'HTTP ' + r.status };
+    return { ok: true, data: r.body };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+});
+
+ipcMain.handle('docker:remove-volume', async (_, { host, port, name, force }) => {
+  try {
+    const r = await dockerRequest({
+      host, port, method: 'DELETE', timeout: 60000,
+      path: `/volumes/${encodeURIComponent(name)}${force ? '?force=true' : ''}`
+    });
+    if (r.status >= 400) return { ok: false, status: r.status, error: (r.body && r.body.message) || 'HTTP ' + r.status };
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+});
+
+ipcMain.handle('docker:remove-network', async (_, { host, port, id }) => {
+  try {
+    const r = await dockerRequest({ host, port, method: 'DELETE', path: `/networks/${encodeURIComponent(id)}`, timeout: 30000 });
+    if (r.status >= 400) return { ok: false, status: r.status, error: (r.body && r.body.message) || 'HTTP ' + r.status };
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+});
+
 // ─── Edit / recreate a container with a modified config (Portainer-style "Duplicate/Edit") ──
 // Same stop → rename → create → start → delete dance as updates:apply, with rollback.
 ipcMain.handle('docker:recreate', async (_, { host, port, id, spec }) => {
@@ -1365,6 +1446,10 @@ ipcMain.handle('docker:recreate', async (_, { host, port, id, spec }) => {
     if (spec.restart != null) {
       payload.HostConfig.RestartPolicy = spec.restart && spec.restart !== 'no' ? { Name: spec.restart } : { Name: '' };
     }
+    // Limits: null/undefined = leave whatever the container already had.
+    // 0 or '' = explicitly unlimited.
+    if (spec.memory != null) payload.HostConfig.Memory = spec.memory ? Math.round(spec.memory * 1024 * 1024) : 0;
+    if (spec.cpus != null) payload.HostConfig.NanoCpus = spec.cpus ? Math.round(spec.cpus * 1e9) : 0;
     if (spec.network != null && spec.network !== '') payload.HostConfig.NetworkMode = spec.network;
 
     // Preserve user-defined network endpoints (aliases, static IPs) unless the network was changed
